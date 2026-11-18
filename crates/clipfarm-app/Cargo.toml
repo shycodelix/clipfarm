@@ -1,0 +1,28 @@
+[package]
+name = "clipfarm-app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "clipfarm desktop app (Rust + egui)"
+
+[[bin]]
+name = "clipfarm-app"
+path = "src/main.rs"
+
+[dependencies]
+clipfarm-core = { path = "../clipfarm-core" }
+anyhow.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+uuid.workspace = true
+egui.workspace = true
+eframe = { workspace = true }
+image = { workspace = true }
+
+[package.metadata.packager]
+product-name = "clipfarm"
+identifier = "app.clipfarm.desktop"
+publisher = "clipfarm"
+description = "Long video in. Shorts out. A local-first Rust clipping studio."
+icons = ["../../build/icon.png"]
+out-dir = "../../dist"

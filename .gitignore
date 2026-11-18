@@ -1,55 +1,40 @@
-# Dependencies
-node_modules/
-.pnp/
-.pnp.js
+# Rust build output
+/target/
+/release/
+/dist/
+**/*.rs.bk
 
-# Build output
-out/
-dist/
-release/
-build/Release/
-*.tsbuildinfo
-
-# Python
-.venv/
-venv/
-__pycache__/
-*.py[cod]
-*.egg-info/
-.pytest_cache/
-.ruff_cache/
-.mypy_cache/
-
-# Local AI models & caches (large, machine specific)
-models/
-.cache/
-*.bin
-*.gguf
-
-# Media artifacts produced locally
-media/
-exports/
+# Local media and working files
+*.mp4
+*.mov
+*.mkv
+*.webm
+*.m4v
+*.wav
+*.m4a
 *.srt
 *.vtt
-*.fcpxml
-*.edl
 
-# Environment / secrets
+# Local models and caches
+models/
+*.bin
+*.gguf
+.cache/
+
+# Environment / machine-specific config
 .env
 .env.*
 !.env.example
-*.token
-bridge.json
+config.local.json
 
-# Logs & OS noise
-*.log
-npm-debug.log*
+# OS and editor noise
 .DS_Store
 Thumbs.db
 desktop.ini
-
-# Editors
+.idea/
 .vscode/*
 !.vscode/extensions.json
-.idea/
 *.swp
+
+# Logs
+*.log

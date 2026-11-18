@@ -1,94 +1,63 @@
 # clipfarm
 
-A local-first desktop video editor for talking-head footage. Drop in a take,
-remove the dead air, read the transcript, cut with word-level captions, and export
-— all on your own machine, with an MCP bridge so coding agents can edit the
-timeline too.
+**Long video in. Shorts out. No cloud, no credits.**
 
-Built with Electron, React, TypeScript, Tailwind CSS, FFmpeg, faster-whisper and
-PySceneDetect. The interface follows Apple's Human Interface Guidelines for desktop
-(see [docs/design-review.md](docs/design-review.md)).
+clipfarm is a desktop clipping studio for turning a stream, podcast or local recording
+into review-ready short-form clips. It pulls the VOD, finds the moments worth posting,
+caps every clip at **60 seconds**, captions them, reframes to 9:16, and exports — or
+gets out of the way and hands you a raw trim for Premiere, Resolve or CapCut.
 
-![clipfarm editor, light appearance](docs/screenshots/editor-light.png)
-
-## Why it exists
-
-Editing an interview is mostly listening, not clicking. clipfarm treats the audio
-envelope and the transcript as first-class timeline data:
-
-- silence is detected on the waveform and ripple-cut with a single command
-- every cut is undoable and never clips a phoneme (configurable padding)
-- captions carry per-word timestamps, so trimming and dead-air removal keep them aligned
-- nothing uploads; the AI runs on the same CPU/GPU that holds the footage
-
-## Features
-
-- **Native-feeling desktop shell** — translucent sidebar and title bar, system
-  Light/Dark, resizable split layout, native menu bar with accelerators, a ⌘K
-  command palette, and a full keyboard editing model.
-- **Timeline** — video, overlay and caption tracks; drag/trim with edge snapping;
-  scene markers; silence zones; zoom and fit; 30 fps timecode.
-- **Silence removal** — FFmpeg `silencedetect` with auto-editor-style padding and
-  ripple behaviour. Adjust noise floor, minimum gap and padding in the AI inspector.
-- **Scene splitting** — PySceneDetect content detector, with sensitivity control;
-  boundaries appear on the ruler and drive Previous/Next Scene.
-- **Transcription** — faster-whisper with `word_timestamps=True`, quantized `int8`,
-  automatic CPU/CUDA selection, VAD, five model sizes. Captions are grouped into
-  readable lines and stay editable.
-- **Export** — H.264/AAC MP4 with source/1080p/4K/vertical presets, three quality
-  levels, optional burned-in captions in three styles, determinate progress and
-  cancel. Audio is normalised to −16 LUFS.
-- **Agent Bridge** — a dependency-free MCP server over stdio that can read the
-  timeline and place, trim, split, caption, clean and export. Copy-paste client
-  config is generated from the app.
-
-## Screenshots
-
-| Dark appearance | Export sheet |
-| --- | --- |
-| ![Dark editor](docs/screenshots/editor-dark.png) | ![Export](docs/screenshots/export-dark.png) |
-
-| Project library | AI inspector |
-| --- | --- |
-| ![Library](docs/screenshots/library-dark.png) | ![AI tools](docs/screenshots/ai-tools.png) |
-
-## Architecture
+Everything is written in **Rust**: the media engine, the CLI, and the desktop UI
+(egui/eframe). There is no Electron, no embedded Chromium, no Python runtime, and no
+paid inference API.
 
 ```
-┌─────────────────────────── Electron ───────────────────────────┐
-│  main process                                                  │
-│   • window, native menu, IPC                                   │
-│   • project store (atomic JSON in userData)                    │
-│   • clipfarm-media:// range-aware protocol for local playback  │
-│   • job manager ── stdio JSON-RPC ──┐                          │
-│  preload (contextBridge, typed API)  │                          │
-│  renderer (React 19 + Tailwind 4)    │                          │
-│   • studio store, undo, autosave     │                          │
-│   • timeline / preview / inspector   │                          │
-└──────────────────────────────────────┼─────────────────────────┘
-                                       ▼
-                        python/clipfarm_core (sidecar + MCP)
-                         • project.py / timeline.py  (pure stdlib)
-                         • silence.py   FFmpeg silencedetect
-                         • scenes.py    PySceneDetect
-                         • transcribe.py faster-whisper int8
-                         • render.py    FFmpeg filter graph + captions
-                         • rpc.py       JSON-RPC server for the app
-                         • mcp_server.py MCP tools for agents
+long VOD ──► speech/VAD ──► clip planning ──► review ──┬─► raw trim (stream copy)
+             + whisper.cpp    (hooks, scores)          └─► 9:16 short + captions
 ```
 
-The Python core is standard-library-only until you install the AI extras, so the
-timeline, MCP server and project IO work even on a bare interpreter. FFmpeg is the
-only hard external dependency.
+## What it does
 
-## Requirements
+- **Ingest anything local, or paste a link.** Local files are referenced, never copied.
+  URLs are fetched with [yt-dlp](https://github.com/yt-dlp/yt-dlp) (YouTube, Twitch,
+  and the rest of its long tail).
+- **Find the spoken parts, not the silence.** A streaming FFmpeg-backed energy VAD
+  finds speech; optional [whisper.cpp](https://github.com/ggerganov/whisper.cpp) adds
+  word-level timestamps, captions and transcript-aware hook scoring.
+- **Plan clips like an editor.** Utterances are joined across natural pauses, split
+  before they can grow past the ceiling, scored on speech density, energy, opening
+  lines, niche keywords and reactions, then ranked.
+- **The 60-second wall.** Clips are clamped when planned, saved, refined and exported.
+  A test proves a 5-minute monologue becomes multiple ≤60s clips and that a 61s clip
+  is refused.
+- **Raw bypass.** One click writes a stream-copy trim (no captions, no reframe) for
+  external NLEs. If a keyframe cut overshoots 60s, clipfarm re-encodes that file at
+  CRF 16 rather than break the ceiling.
+- **Rendered shorts.** 1080×1920 H.264/AAC with a heuristic subject-aware crop,
+  burned-in captions (Clean/Bold/Karaoke), faststart, and hardware H.264 when the
+  machine exposes VideoToolbox, NVENC, Quick Sync or AMF.
+- **Refine in plain English.** “make it 30 seconds, tighter, captions off” becomes
+  explicit, reversible clip operations. Unknown requests can be routed to a **local**
+  model, never a paid API.
+- **Metadata without the cringe.** Titles, one-line captions and hashtags are generated
+  offline from the niche and the words actually spoken. An optional local Ollama model
+  can polish them.
+- **Trend-aware pacing, honestly labeled.** Bundled profiles per niche and platform
+  set clip length, cut rhythm, caption style and hashtags. They are opinionated
+  starting points, not scraped trend data — and you can override them with your own
+  JSON feed.
 
-| Component | Version |
-| --- | --- |
-| Node.js | 20+ (this repo was built with 26) |
-| Python | 3.10+ |
-| FFmpeg + FFprobe | 5.0+ on `PATH` |
-| AI extras (optional) | faster-whisper, PySceneDetect, NumPy |
+## Quick start
+
+### Requirements
+
+| Tool | Needed? | Notes |
+| --- | --- | --- |
+| **FFmpeg + ffprobe** | required | Only hard dependency. 5.0+; 7.x recommended. A build with libass is needed to burn captions. |
+| **yt-dlp** | for URLs | `pipx install yt-dlp`, `brew install yt-dlp`, `winget install yt-dlp` |
+| **whisper.cpp** | optional | Word-level captions. Without it clipfarm runs VAD-only. Needs a `ggml-*.bin` model. |
+| **Ollama** (or any loopback OpenAI-ish JSON endpoint) | optional | Local title/refine assistance. Off by default. |
+| **Rust 1.80+** | build only | `rustup` installs it. |
 
 Install FFmpeg:
 
@@ -96,215 +65,233 @@ Install FFmpeg:
 # macOS
 brew install ffmpeg
 # Windows
-winget install Gyan.FFmpeg
-# Debian/Ubuntu
+winget install Gyan.FFmpeg        # or: choco install ffmpeg
+# Debian / Ubuntu
 sudo apt install ffmpeg
 ```
 
-## Quick start
+### Use the CLI
+
+```bash
+cargo run --release -p clipfarm-cli -- doctor
+
+# Local file, or paste a URL
+cargo run --release -p clipfarm-cli -- ingest ~/Videos/interview.mp4 \
+  --niche podcast --platform tiktok --clips 6
+
+cargo run --release -p clipfarm-cli -- clips <project-id>
+cargo run --release -p clipfarm-cli -- refine <project-id> 1 "make it 30 seconds, tighter"
+cargo run --release -p clipfarm-cli -- export <project-id> 1 --raw
+cargo run --release -p clipfarm-cli -- export <project-id> 1
+```
+
+The first run prints the project id. Everything lands in the clipfarm data directory
+(see [Where things live](#where-things-live)).
+
+### Open the desktop app
+
+```bash
+cargo run --release -p clipfarm-app
+```
+
+The app has four rooms:
+
+- **The farm** — drop a file or paste a URL, pick a niche and feed, set the clip count
+  and ceiling, start the harvest.
+- **The clips** — thumbnail grid, hook scores, inline title/caption editing, refine
+  chat, caption/vertical toggles, raw and rendered export.
+- **Trend desk** — the pacing profile clipfarm followed, and the same niche on other
+  feeds. Apply a caption style to the whole harvest.
+- **Tuning** — tool discovery, binary paths, local-model switch, data locations and
+  shortcuts.
+
+Paths are read from the text field; drag-and-drop works on the farm screen. The app
+is keyboard-operable (`⌘/Ctrl+1…4`, `⌘/Ctrl+E`, `⌘/Ctrl+N`, `Esc`).
+
+## Install
+
+### 1. Native packages
+
+The release workflow builds platform installers from the same source:
+
+| Platform | Formats |
+| --- | --- |
+| macOS | `.dmg` (Apple silicon and Intel; FFmpeg recommended via Homebrew) |
+| Windows | `.msi` / NSIS `.exe` |
+| Linux | `.deb` and `.AppImage` |
+
+Grab them from **Releases** once the repository has been published and the workflow
+has run. Local packaging is documented in [docs/PLATFORM.md](docs/PLATFORM.md).
+
+### 2. Terminal / package manager
+
+```bash
+# From a git checkout, anywhere Rust is installed
+cargo install --git https://github.com/<your-account>/clipfarm clipfarm-cli
+
+# Homebrew / winget formulae are planned but not published; use the installer or
+# cargo install until they are.
+```
+
+### 3. Build from source
 
 ```bash
 git clone https://github.com/<your-account>/clipfarm.git
 cd clipfarm
-npm install
-npm run python:setup   # creates .venv and installs the AI extras
-npm run dev            # launches the desktop app
+
+# Linux build prerequisites for the window (Debian/Ubuntu)
+sudo apt install build-essential pkg-config libxkbcommon-dev libwayland-dev libx11-dev
+
+cargo build --release -p clipfarm-cli
+cargo build --release -p clipfarm-app
+
+./target/release/clipfarm doctor
+./target/release/clipfarm-app
 ```
 
-`npm run python:setup` installs `python/requirements-ai.txt` into `.venv`. The main
-process prefers `CLIPFARM_PYTHON`, then `.venv`, then `python3`, and reports each
-capability in **Settings → Media engine**. A missing FFmpeg or Whisper shows as a
-warning with the exact install command — nothing fails silently.
+## How a harvest works
 
-To iterate on the UI in a browser (seeded demo project, simulated analysis):
+1. **Ingest.** `yt-dlp` downloads to the project folder, or a local file is referenced
+   in place. FFprobe records duration, resolution, fps and stream info.
+2. **Listen.** FFmpeg decodes mono 16 kHz PCM into a streaming VAD (30 ms frames,
+   RMS threshold, silence hangover, padding). A three-hour VOD never fits in memory.
+3. **Transcribe (optional).** whisper.cpp writes one-word segments with millisecond
+   offsets (`--output-json --max-len 1 --split-on-word`); clipfarm normalizes them into
+   a transcript. Missing whisper is a warning, not a failure.
+4. **Plan.** Speech is joined across pauses (≈1.2–3.2 s depending on feed tempo),
+   long monologues are split under the ceiling, and each candidate is scored 0–100 for
+   speech density, level, opening question, niche keywords, reactions and pace.
+5. **Dress.** Titles/captions/hashtags come from the transcript and the niche profile;
+   captions are grouped into ≤42-character, ≤3.6 s lines; thumbnails are extracted.
+6. **Review and refine.** Edits are explicit ops on the clip — duration, in-point,
+   tighten, captions, aspect, filler removal, title/caption. Nothing is hidden.
+7. **Export.** Raw uses `-c copy`; rendered crops/pads to 1080×1920, burns SRT through
+   libass, encodes H.264 + AAC with the best available encoder, and always re-checks
+   the 60s ceiling.
 
-```bash
-npm run dev:web        # http://localhost:3000
-```
+## Zero-cost AI, enforced
 
-The renderer detects the missing preload bridge and swaps in a demo backend
-(`src/renderer/src/lib/demo.ts`), so design work never needs Electron.
+There are no API keys and no credit meter. The optional assistant is Ollama (or a
+compatible local server) and the guard lives in the engine, not the UI:
 
-### Build installers
-
-```bash
-npm run dist:mac       # dmg + zip (hardened runtime entitlements in build/)
-npm run dist:win       # NSIS x64 + arm64
-npm run dist:linux     # AppImage
-```
-
-Packaging copies `python/clipfarm_core` as an extra resource. The end user still
-needs Python and (for transcription) the AI extras; the app points at the same
-`.venv` resolution logic and reports what is missing. Set `CLIPFARM_PYTHON` to a
-frozen interpreter or a shim if you ship your own runtime.
-
-## Using clipfarm
-
-1. **New Project** → drag media into the bin (or ⌘I). Files are referenced, not copied.
-2. **Remove Silence** (⇧⌘D) or use **AI Tools** to tune the noise floor, gap and padding.
-   The timeline ripples; ⌘Z restores the original timing.
-3. **Transcribe** (⌘T) after picking a Whisper model. Captions land on the captions
-   track and in the Transcript panel; click any line to seek.
-4. **Edit**: drag clips, drag their edges to trim, ⌘B to split at the playhead,
-   ⌥←/→ to jump between detected scenes, ⌘K for every command.
-5. **Export** (⇧⌘E), choose a preset, optionally burn in captions, and pick a destination.
-
-### Keyboard shortcuts
-
-| Shortcut | Action |
-| --- | --- |
-| Space | Play / pause |
-| J / K / L | Rewind / pause / play forward |
-| ⌘B | Split at playhead |
-| ⇧⌘D | Remove silence & dead air |
-| ⇧⌘C | Detect scenes |
-| ⌘T | Transcribe |
-| ⌘I | Import media |
-| ⌘S | Save now (autosave is always on) |
-| ⌘Z / ⇧⌘Z | Undo / redo |
-| ⌘K | Command palette |
-| ⌘1–4 | Library / Media / Transcript / Agent Bridge |
-| ⌥⌘S | Toggle sidebar |
-| ⌥⌘I | Toggle inspector |
-| ⌘/ | All shortcuts |
-| ⌘, | Settings |
-
-## Agent Bridge (MCP)
-
-The desktop app generates a ready-to-paste config in **Agent Bridge** (⌘4). It runs
-the same Python package as a stdio MCP server pointed at the open project file:
-
-```json
-{
-  "mcpServers": {
-    "clipfarm": {
-      "command": "/path/to/clipfarm/.venv/bin/python",
-      "args": [
-        "-m",
-        "clipfarm_core",
-        "mcp",
-        "--project",
-        "/Users/you/Library/Application Support/clipfarm/projects/<id>.json"
-      ],
-      "env": { "PYTHONPATH": "/path/to/clipfarm/python" }
-    }
-  }
+```rust
+if !is_loopback(endpoint) {
+    return Err("Refusing to call `…`: clipfarm only talks to a local model.");
 }
 ```
 
-Tools: `clipfarm_get_timeline`, `clipfarm_list_assets`, `clipfarm_place_clip`,
-`clipfarm_trim_clip`, `clipfarm_split_clip`, `clipfarm_delete_clip`,
-`clipfarm_add_caption`, `clipfarm_remove_silences`, `clipfarm_detect_scenes`,
-`clipfarm_transcribe`, `clipfarm_export`. Full schemas and the project JSON contract
-are in [docs/PROJECT_FORMAT.md](docs/PROJECT_FORMAT.md).
+`https://api.openai.com`, a tunnel, or `http://127.0.0.1.evil.example` are all rejected
+before a request is made. Metadata generation and refinement work without any model at
+all; the model only improves phrasing and catches fuzzy intent.
 
-Example request to an assistant:
+## Trend profiles
 
-> Read the clipfarm timeline, remove the dead air from the interview, add a caption
-> at every scene start, then export a 1080p cut to ~/Movies/interview-cut.mp4.
+`clipfarm trends` lists the bundled profiles. Each one sets:
 
-The server is stdio-only: no port, no account, no network listener. Every mutation
-writes to the project file, so the open app picks it up and the action stays
-reviewable/undoable in the UI.
+- target clip window (`min_seconds`–`max_seconds`), always capped at 60
+- cut cadence (`cut_every`) and a caption style
+- hook patterns with a `{topic}` slot
+- platform and niche hashtags
+- short editorial notes
 
-## Data and privacy
+Override them by dropping a JSON array at `<data>/trends.json` (same shape as
+`TrendProfile` in `crates/clipfarm-core/src/trends.rs`). This is the integration point
+for a scheduled trend job you control; clipfarm itself does not scrape feeds or
+pretend to know today's meme.
 
-Everything is local:
+## Where things live
 
-- projects: `<userData>/projects/<id>.json`
-- thumbnails: `<userData>/thumbnails/`
-- Whisper models: `~/.cache/clipfarm/models` (override with `CLIPFARM_MODEL_DIR`)
-- renders: wherever you choose
+| What | Where |
+| --- | --- |
+| Projects (JSON) | `<data>/projects/<uuid>.json` |
+| Downloaded media, thumbnails, whisper work files | `<data>/media/<project-uuid>/` |
+| Exports | `<data>/exports/<project-slug>/` |
+| Config | `<data>/config.json` |
+| Trend overrides | `<data>/trends.json` |
 
-Media is served to the renderer through a custom `clipfarm-media://` protocol with
-range support; the renderer never receives raw filesystem access. Only a model
-download on first transcription touches the network.
+`<data>` is the OS data directory (`~/Library/Application Support/clipfarm` on macOS,
+`%APPDATA%\clipfarm` on Windows, `~/.local/share/clipfarm` on Linux), unless
+`CLIPFARM_HOME` is set. Source files are never modified.
 
-## Project layout
+## Configuration
+
+Environment variables win over `config.json`:
+
+| Variable | Purpose |
+| --- | --- |
+| `CLIPFARM_HOME` | Data directory |
+| `CLIPFARM_FFMPEG`, `CLIPFARM_FFPROBE` | Explicit binary paths |
+| `CLIPFARM_YTDLP` | yt-dlp path |
+| `CLIPFARM_WHISPER` | whisper.cpp CLI (`whisper-cli` or `main`) |
+| `CLIPFARM_WHISPER_MODEL` | `ggml-base.en.bin`, `ggml-small.en.bin`, … |
+| `OLLAMA_HOST` | Local assistant endpoint (loopback only) |
+| `CLIPFARM_LLM_MODEL` | Model name, default `llama3.2` |
+
+## Tests
+
+```bash
+cargo fmt --check
+cargo test --workspace            # 36 unit tests + engine tests
+
+# Real FFmpeg pipeline: ingest → VAD → plan → thumbnails → raw + 1080×1920 export
+CLIPFARM_TEST_FFMPEG=/path/to/ffmpeg cargo test -p clipfarm-core --test ffmpeg_pipeline -- --nocapture
+```
+
+The integration test generates a 36-second 720p fixture with alternating speech and
+silence, proves every planned clip is ≤60s, checks thumbnails, exports a raw trim and a
+1080×1920 render, and asserts a 61-second clip is rejected.
+
+The desktop UI is compile-checked in CI. Headless Linux runners cannot open a window,
+so the UI needs a manual visual pass on a machine with a display (see the honest status
+in [docs/PLATFORM.md](docs/PLATFORM.md#verification-status)).
+
+## Limitations
+
+- **whisper.cpp is a CLI integration**, not linked bindings; the exact JSON shape is
+  parsed defensively, and a missing model degrades to VAD-only.
+- **Smart framing is a heuristic** (column edge-energy over a sampled frame), not
+  OpenCV/ONNX face tracking. A model-backed tracker is an extension point in
+  `media::focus_center`.
+- **Trend profiles are curated, not live-scraped.** Real-time trend ingestion is left
+  to a feed you control; this avoids ToS and rate-limit games.
+- **Raw trims are keyframe-accurate**, so the first frame may precede the requested
+  in-point. Use a rendered clip when frame accuracy matters.
+- **Captions need libass.** Without it, rendered clips still export and an `.srt`
+  sidecar is written.
+- **Previewing a cut renders a small file and opens it in your system player.** There
+  is no in-app, frame-accurate video preview yet; that is the next milestone.
+- **Mobile is not shipped.** The core is portable, but the desktop UI and binary
+  dependencies are not. See [docs/PLATFORM.md](docs/PLATFORM.md#mobile-feasibility).
+
+## Repository layout
 
 ```
 clipfarm/
-├─ .design-rules/            Apple HIG skill (123 guideline pages) used for review
-├─ build/                    packaging entitlements + app icon
+├─ .design-rules/              Apple HIG reference clone, used for UI review
+├─ build/icon.png              app icon (generated by scripts/make-icon.py)
+├─ crates/
+│  ├─ clipfarm-core/           engine: ingest, VAD, whisper, planning, metadata,
+│  │                           trends, refine, FFmpeg export, project store
+│  ├─ clipfarm-cli/            `clipfarm` command line
+│  └─ clipfarm-app/            Rust desktop UI (egui/eframe)
 ├─ docs/
-│  ├─ design-review.md       HIG audit with citations and known gaps
-│  ├─ PROJECT_FORMAT.md      project JSON + MCP tool contract
-│  └─ screenshots/
-├─ python/
-│  ├─ clipfarm_core/         local media engine and MCP server
-│  └─ tests/                 unit tests + FFmpeg integration tests
-├─ src/
-│  ├─ main/                  Electron main: window, menu, store, jobs, protocol
-│  ├─ preload/               typed contextBridge API
-│  ├─ renderer/              React UI
-│  └─ shared/types.ts        contract shared by all three
-├─ electron.vite.config.ts
-├─ vite.renderer.config.ts   browser preview of the renderer
-└─ electron-builder.yml
+│  ├─ ARCHITECTURE.md          data flow, invariants, extension points
+│  └─ PLATFORM.md              packaging, OS prerequisites, mobile feasibility
+├─ .github/workflows/          CI and installer builds
+└─ scripts/make-icon.py
 ```
-
-## Tests and checks
-
-```bash
-npm run typecheck                       # main, preload and renderer
-npm run build                           # typecheck + production bundles
-npm run python:test                     # unit tests (FFmpeg integration auto-skips)
-
-# End-to-end media pipeline (needs FFmpeg on PATH)
-PYTHONPATH=python python3 -m unittest python/tests/test_ffmpeg_integration.py -v
-```
-
-The integration test generates an 8-second clip with a two-second silent gap, then
-verifies FFprobe metadata, silence detection (start/end accuracy) and a real render
-with burned-in captions.
-
-## Design
-
-The UI was built and reviewed against Apple's Human Interface Guidelines using the
-`dickwu/apple-design-skill` clone in `.design-rules/`:
-
-- functional layer (title bar, sidebar, transport) vs content layer (media, timeline)
-- semantic colors with system Light/Dark, no app-level appearance override
-- 8/16 pt spacing rhythm, 30–32 px control heights, 11–13 pt desktop type
-- determinate progress with stage text and cancel; quiet success, actionable errors
-- native menu parity, standard shortcuts preserved, every command discoverable
-
-The audit, with file-level citations and an honest list of unverified items
-(VoiceOver pass, Windows/Linux chrome, reduced-transparency inspection), is in
-[docs/design-review.md](docs/design-review.md).
-
-## Troubleshooting
-
-**"FFmpeg is missing"** — install it and press *Check again* in Settings. The app
-looks for `ffmpeg`/`ffprobe` on `PATH`, including PATH inherited at launch.
-
-**Transcription says faster-whisper is not installed** — run `npm run python:setup`,
-or point `CLIPFARM_PYTHON` at an interpreter that has it.
-
-**First transcription is slow** — the model (default `small.en`, int8) downloads once.
-Use `tiny.en` for quick drafts; on Apple silicon and NVIDIA, CTranslate2 picks a
-faster device automatically.
-
-**Scenes detect nothing** — raise or lower *Scene sensitivity* (content threshold).
-Hard cuts work best; long dissolves may need a lower threshold.
-
-**Silence removal cuts too aggressively** — increase Padding to 0.2–0.3 s, raise the
-noise floor toward −30 dB, or raise Min gap.
-
-**MCP client cannot find clipfarm_core** — set `PYTHONPATH` to the repository's
-`python/` directory (the generated config already does), or install the package with
-`pip install -e python`.
 
 ## Credits
 
-- Silence detection is inspired by [auto-editor](https://github.com/WyattBlue/auto-editor);
-  clipfarm implements its own FFmpeg-based pass so it can ripple the timeline directly.
-- [faster-whisper](https://github.com/SYSTRAN/faster-whisper) (MIT) and CTranslate2 for
-  local speech recognition.
-- [PySceneDetect](https://github.com/Breakthrough/PySceneDetect) for shot boundaries.
+- [FFmpeg](https://ffmpeg.org/) for decode, analysis and encode; [ffmpeg-next] was not
+  used because subprocess orchestration gives clearer progress, cancellation and
+  licensing boundaries.
+- [yt-dlp](https://github.com/yt-dlp/yt-dlp) for VOD ingestion.
+- [whisper.cpp](https://github.com/ggerganov/whisper.cpp) for local word-level ASR.
+- [Ollama](https://ollama.com/) for optional loopback inference.
+- [egui / eframe](https://github.com/emilk/egui) for the Rust-native UI.
 - [Apple Design Skill](https://github.com/dickwu/apple-design-skill) for the HIG
-  reference and review framework.
-- Icons by [Lucide](https://lucide.dev).
+  reference used during design review.
 
 ## License
 
@@ -312,20 +299,15 @@ MIT — see [LICENSE](LICENSE).
 
 ## Publishing this repository
 
-The working tree is already a git repository with an initial commit on `main`. To
-publish it with the GitHub CLI:
+The working tree is a git repository with a commit on `main`. Publish it with:
 
 ```bash
 gh repo create clipfarm --public --source=. --remote=origin --push
 ```
 
-Or with a remote you created yourself:
+or:
 
 ```bash
 git remote add origin git@github.com:<your-account>/clipfarm.git
-git branch -M main
 git push -u origin main
 ```
-
-`.design-rules/` is committed as reference material for design reviews; remove it
-from `.gitignore`-free history if you prefer to add it as a submodule instead.

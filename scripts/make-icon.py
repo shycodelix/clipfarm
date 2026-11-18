@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Generate build/icon.png (1024×1024 RGBA) with no image dependencies.
 
-A rounded blue tile, a glass play button and three "crop row" bars, matching the
+A warm coral tile, an ink play button and three "crop row" bars, matching the
 in-app mark. Run with: python3 scripts/make-icon.py
 """
 
@@ -59,11 +59,11 @@ def pixel(x: float, y: float) -> tuple[int, int, int, int]:
     if alpha <= 0:
         return (0, 0, 0, 0)
 
-    # Diagonal blue gradient with a soft highlight in the upper left.
+    # Diagonal coral gradient with a soft highlight in the upper left.
     t = clamp((x * 0.55 + y * 0.45) / SIZE)
-    r = int(91 + (6 - 91) * t)
-    g = int(176 + (70 - 176) * t)
-    b = int(255 + (156 - 255) * t)
+    r = int(255 + (206 - 255) * t)
+    g = int(124 + (56 - 124) * t)
+    b = int(92 + (38 - 92) * t)
     highlight = clamp(1.0 - math.hypot(x - SIZE * 0.3, y - SIZE * 0.2) / (SIZE * 0.75))
     r = int(r + (255 - r) * 0.22 * highlight)
     g = int(g + (255 - g) * 0.22 * highlight)
@@ -82,12 +82,12 @@ def pixel(x: float, y: float) -> tuple[int, int, int, int]:
             g = int(g + (255 - g) * 0.38 * border)
             b = int(b + (255 - b) * 0.38 * border)
 
-    # Play glyph.
+    # Play glyph in warm ink.
     play = triangle(x, y)
     if play > 0:
-        r = int(r + (255 - r) * play)
-        g = int(g + (255 - g) * play)
-        b = int(b + (255 - b) * play)
+        r = int(r + (28 - r) * play)
+        g = int(g + (14 - g) * play)
+        b = int(b + (10 - b) * play)
 
     # Three crop-row bars near the bottom.
     if 860 < y < 892:
@@ -95,9 +95,9 @@ def pixel(x: float, y: float) -> tuple[int, int, int, int]:
             if start <= x <= start + width:
                 bar = clamp(0.5 + min(x - start, start + width - x, y - 864, 888 - y))
                 if bar > 0:
-                    r = int(r + (255 - r) * 0.5 * bar)
-                    g = int(g + (255 - g) * 0.5 * bar)
-                    b = int(b + (255 - b) * 0.5 * bar)
+                    r = int(r + (28 - r) * 0.62 * bar)
+                    g = int(g + (14 - g) * 0.62 * bar)
+                    b = int(b + (10 - b) * 0.62 * bar)
 
     return (clamp(r / 255) * 255, clamp(g / 255) * 255, clamp(b / 255) * 255, alpha * 255)
 
