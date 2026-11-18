@@ -1,0 +1,16 @@
+# Everything clipfarm needs for local AI editing.
+# Install into a virtualenv with: npm run python:setup
+#
+# FFmpeg itself is a system binary, not a Python package:
+#   macOS    brew install ffmpeg
+#   Windows  winget install Gyan.FFmpeg
+#   Linux    sudo apt install ffmpeg
+
+faster-whisper>=1.0.3        # word-level timestamps, CTranslate2 int8 inference
+scenedetect[opencv]>=0.6.4   # content-aware scene splitting
+numpy>=1.26
+
+# Optional: install auto-editor as well if you want to compare cut heuristics.
+# clipfarm ships its own FFmpeg-based dead-air detector, but auto-editor's
+# threshold profiles are a useful reference:
+#   pip install auto-editor

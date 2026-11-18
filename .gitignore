@@ -1,0 +1,55 @@
+# Dependencies
+node_modules/
+.pnp/
+.pnp.js
+
+# Build output
+out/
+dist/
+release/
+build/Release/
+*.tsbuildinfo
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Local AI models & caches (large, machine specific)
+models/
+.cache/
+*.bin
+*.gguf
+
+# Media artifacts produced locally
+media/
+exports/
+*.srt
+*.vtt
+*.fcpxml
+*.edl
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+*.token
+bridge.json
+
+# Logs & OS noise
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editors
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.swp

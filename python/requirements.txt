@@ -1,0 +1,3 @@
+# The core engine is standard-library only so `serve`, `mcp` and the timeline
+# operations always work. FFmpeg must be available on PATH.
+# See requirements-ai.txt for transcription and scene detection extras.

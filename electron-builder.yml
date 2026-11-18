@@ -1,0 +1,42 @@
+appId: com.clipfarm.studio
+productName: clipfarm
+copyright: Copyright © 2026 clipfarm
+directories:
+  output: release
+  buildResources: build
+files:
+  - out/**/*
+  - package.json
+extraResources:
+  - from: python
+    to: python
+    filter:
+      - '**/*.py'
+      - '**/*.txt'
+      - '**/*.toml'
+      - '!**/__pycache__/**'
+      - '!**/.venv/**'
+asar: true
+mac:
+  category: public.app-category.video
+  target:
+    - dmg
+    - zip
+  darkModeSupport: true
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+win:
+  target:
+    - target: nsis
+      arch: [x64, arm64]
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+linux:
+  target:
+    - AppImage
+  category: AudioVideo
+  maintainer: clipfarm

@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "clipfarm-core"
+version = "0.1.0"
+description = "Local media engine for clipfarm: silence removal, scene detection, transcription, rendering and MCP"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.optional-dependencies]
+ai = ["faster-whisper>=1.0.3", "scenedetect[opencv]>=0.6.4", "numpy>=1.26"]
+dev = ["pytest>=8"]
+
+[project.scripts]
+clipfarm-core = "clipfarm_core.__main__:main"
+
+[tool.setuptools]
+packages = ["clipfarm_core"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
