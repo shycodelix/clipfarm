@@ -16,6 +16,16 @@ long VOD ──► speech/VAD ──► clip planning ──► review ──┬
              + whisper.cpp    (hooks, scores)          └─► 9:16 short + captions
 ```
 
+## Screenshots
+
+Both rooms in both palettes, rendered from the real app (headless Linux, 1440×900):
+
+| The farm — dark | The clips room — dark |
+| --- | --- |
+| ![Farm, dark palette](docs/screenshots/farm-dark.png) | ![Clips room, dark palette](docs/screenshots/clips-dark.png) |
+| **The farm — light** | **The clips room — light** |
+| ![Farm, light palette](docs/screenshots/farm-light.png) | ![Clips room, light palette](docs/screenshots/clips-light.png) |
+
 ## What it does
 
 - **Ingest anything local, or paste a link.** Local files are referenced, never copied.

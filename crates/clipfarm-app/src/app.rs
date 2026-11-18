@@ -95,6 +95,9 @@ pub struct ClipfarmApp {
     refine_text: String,
     refine_log: Vec<String>,
     quality: Quality,
+    screenshot_path: Option<PathBuf>,
+    screenshot_frames: u32,
+    screenshot_requested: bool,
 }
 
 impl ClipfarmApp {
@@ -128,9 +131,37 @@ impl ClipfarmApp {
             refine_text: String::new(),
             refine_log: Vec::new(),
             quality: Quality::Balanced,
+            screenshot_path: None,
+            screenshot_frames: 0,
+            screenshot_requested: false,
         };
         app.refresh_projects();
-        app.job = None;
+        let mut args = std::env::args().skip(1);
+        while let Some(arg) = args.next() {
+            match arg.as_str() {
+                "--screenshot" => app.screenshot_path = args.next().map(PathBuf::from),
+                "--prefill" => app.input = args.next().unwrap_or_default(),
+                "--light" => app.dark = false,
+                "--screen" => match args.next().as_deref() {
+                    Some("clips") => app.screen = Screen::Clips,
+                    Some("trends") => app.screen = Screen::Trends,
+                    Some("tuning") => app.screen = Screen::Tuning,
+                    _ => app.screen = Screen::Farm,
+                },
+                "--project" => {
+                    if let Some(selector) = args.next() {
+                        match project::load_project(&selector) {
+                            Ok(project) => {
+                                app.project = Some(project);
+                                app.screen = Screen::Clips;
+                            }
+                            Err(error) => eprintln!("Could not load project: {error:#}"),
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
         let _ = cc;
         app
     }
@@ -780,23 +811,35 @@ impl ClipfarmApp {
             });
             ui.add_space(14.0);
             ui.horizontal(|ui| {
-                ui.label(RichText::new("Clips").size(12.0).color(p.muted));
-                ui.add(egui::Slider::new(&mut self.target_clips, 1..=12).show_value(true));
-                ui.add_space(16.0);
-                ui.label(RichText::new("Max length").size(12.0).color(p.muted));
-                ui.add(
-                    egui::Slider::new(&mut self.max_seconds, 10.0..=60.0)
-                        .suffix("s")
-                        .show_value(true),
-                );
+                ui.vertical(|ui| {
+                    theme::kicker(ui, p, "Clips to find");
+                    ui.add(
+                        egui::Slider::new(&mut self.target_clips, 1..=12)
+                            .show_value(true)
+                            .trailing_fill(true),
+                    );
+                    ui.label(
+                        RichText::new("Be picky at review time.")
+                            .size(10.0)
+                            .color(p.faint),
+                    );
+                });
+                ui.add_space(42.0);
+                ui.vertical(|ui| {
+                    theme::kicker(ui, p, "Maximum length");
+                    ui.add(
+                        egui::Slider::new(&mut self.max_seconds, 10.0..=60.0)
+                            .suffix("s")
+                            .show_value(true)
+                            .trailing_fill(true),
+                    );
+                    ui.label(
+                        RichText::new("60s is a wall, not a suggestion.")
+                            .size(10.0)
+                            .color(p.faint),
+                    );
+                });
             });
-            ui.label(
-                RichText::new(
-                    "60 seconds is a wall, not a suggestion. Every export is checked against it.",
-                )
-                .size(10.5)
-                .color(p.faint),
-            );
             ui.add_space(12.0);
             let llm_available = self.config.llm_allowed();
             ui.horizontal(|ui| {
@@ -903,6 +946,7 @@ impl ClipfarmApp {
         for summary in self.projects.clone() {
             let response = egui::Frame::default()
                 .fill(p.card)
+                .stroke(egui::Stroke::new(1.0_f32, p.line))
                 .inner_margin(Margin::symmetric(14, 10))
                 .show(ui, |ui| {
                     ui.set_width(ui.available_width());
@@ -952,6 +996,10 @@ impl ClipfarmApp {
     ) -> bool {
         let response = egui::Frame::default()
             .fill(if selected { p.card_alt } else { p.card })
+            .stroke(egui::Stroke::new(
+                1.0_f32,
+                if selected { p.accent } else { p.line },
+            ))
             .inner_margin(Margin::same(12))
             .show(ui, |ui| {
                 ui.set_width(236.0);
@@ -988,8 +1036,19 @@ impl ClipfarmApp {
                             .color(p.faint),
                     );
                 });
-                ui.label(RichText::new(&clip.title).size(12.5).strong().color(p.ink));
-                ui.label(RichText::new(&clip.hook).size(11.0).color(p.muted));
+                ui.label(
+                    RichText::new(compact(&clip.title, 48))
+                        .size(12.5)
+                        .strong()
+                        .color(p.ink),
+                );
+                if !clip.hook.is_empty() && clip.hook != clip.title {
+                    ui.label(
+                        RichText::new(compact(&clip.hook, 62))
+                            .size(11.0)
+                            .color(p.muted),
+                    );
+                }
             })
             .response;
         response.interact(Sense::click()).clicked()
@@ -1106,217 +1165,250 @@ impl ClipfarmApp {
                 .max_height(ui.available_height() - 8.0)
                 .show(ui, |ui| {
                     ui.set_width(inspector_width);
-                    let Some(clip) = self
-                        .project
-                        .as_ref()
-                        .and_then(|project| project.clips.get(self.selected))
-                        .cloned()
-                    else {
-                        return;
-                    };
-                    egui::Frame::default()
-                        .fill(p.card)
-                        .inner_margin(Margin::same(16))
-                        .show(ui, |ui| {
-                            ui.set_width(inspector_width - 32.0);
-                            ui.horizontal(|ui| {
-                                theme::chip(
-                                    ui,
-                                    p.accent,
-                                    p.accent_ink,
-                                    &format!("{:.0} hook", clip.score),
+                    // The scroll area sits inside a horizontal layout; force a
+                    // vertical stack or every field lands on one runaway row.
+                    ui.vertical(|ui| {
+                        let Some(clip) = self
+                            .project
+                            .as_ref()
+                            .and_then(|project| project.clips.get(self.selected))
+                            .cloned()
+                        else {
+                            return;
+                        };
+                        egui::Frame::default()
+                            .fill(p.card)
+                            .inner_margin(Margin::same(16))
+                            .show(ui, |ui| {
+                                ui.set_width(inspector_width - 32.0);
+                                let (preview_rect, _) = ui.allocate_exact_size(
+                                    egui::vec2(ui.available_width(), 110.0),
+                                    Sense::hover(),
                                 );
-                                theme::chip(
-                                    ui,
-                                    p.card_alt,
-                                    p.muted,
-                                    &format!("{:.1}s", clip.duration()),
-                                );
-                                if !clip.exports.is_empty() {
-                                    theme::chip(ui, p.card_alt, p.mint, "exported");
-                                }
-                            });
-                            ui.add_space(8.0);
-                            theme::kicker(ui, p, "Title");
-                            if let Some(project) = self.project.as_mut() {
-                                if let Some(clip) = project.clips.get_mut(self.selected) {
-                                    if ui
-                                        .add(
-                                            egui::TextEdit::multiline(&mut clip.title)
-                                                .desired_rows(2)
-                                                .desired_width(f32::INFINITY),
-                                        )
-                                        .changed()
-                                    {
-                                        dirty = true;
-                                    }
-                                }
-                            }
-                            ui.add_space(8.0);
-                            theme::kicker(ui, p, "Caption on the post");
-                            if let Some(project) = self.project.as_mut() {
-                                if let Some(clip) = project.clips.get_mut(self.selected) {
-                                    if ui
-                                        .add(
-                                            egui::TextEdit::multiline(&mut clip.caption)
-                                                .desired_rows(3)
-                                                .desired_width(f32::INFINITY),
-                                        )
-                                        .changed()
-                                    {
-                                        dirty = true;
-                                    }
-                                    ui.label(
-                                        RichText::new(
-                                            clip.hashtags
-                                                .iter()
-                                                .map(|tag| format!("#{tag}"))
-                                                .collect::<Vec<_>>()
-                                                .join(" "),
-                                        )
-                                        .size(11.0)
-                                        .color(p.muted),
+                                if let Some(texture) = self.thumbnails.get(&clip.id) {
+                                    ui.painter().image(
+                                        texture.id(),
+                                        preview_rect,
+                                        egui::Rect::from_min_max(
+                                            egui::pos2(0.0, 0.0),
+                                            egui::pos2(1.0, 1.0),
+                                        ),
+                                        Color32::WHITE,
+                                    );
+                                } else {
+                                    ui.painter().rect_filled(preview_rect, 6.0, p.card_alt);
+                                    ui.painter().text(
+                                        preview_rect.center(),
+                                        egui::Align2::CENTER_CENTER,
+                                        "no still yet",
+                                        egui::FontId::proportional(11.0),
+                                        p.faint,
                                     );
                                 }
-                            }
-                            ui.add_space(10.0);
-                            ui.horizontal_wrapped(|ui| {
+                                ui.add_space(10.0);
+                                ui.horizontal(|ui| {
+                                    theme::chip(
+                                        ui,
+                                        p.accent,
+                                        p.accent_ink,
+                                        &format!("{:.0} hook", clip.score),
+                                    );
+                                    theme::chip(
+                                        ui,
+                                        p.card_alt,
+                                        p.muted,
+                                        &format!("{:.1}s", clip.duration()),
+                                    );
+                                    if !clip.exports.is_empty() {
+                                        theme::chip(ui, p.card_alt, p.mint, "exported");
+                                    }
+                                });
+                                ui.add_space(8.0);
+                                theme::kicker(ui, p, "Title");
                                 if let Some(project) = self.project.as_mut() {
                                     if let Some(clip) = project.clips.get_mut(self.selected) {
                                         if ui
-                                            .checkbox(
-                                                &mut clip.settings.captions_enabled,
-                                                RichText::new("captions").size(12.0),
+                                            .add(
+                                                egui::TextEdit::multiline(&mut clip.title)
+                                                    .desired_rows(2)
+                                                    .desired_width(f32::INFINITY),
                                             )
                                             .changed()
                                         {
                                             dirty = true;
                                         }
+                                    }
+                                }
+                                ui.add_space(8.0);
+                                theme::kicker(ui, p, "Caption on the post");
+                                if let Some(project) = self.project.as_mut() {
+                                    if let Some(clip) = project.clips.get_mut(self.selected) {
                                         if ui
-                                            .checkbox(
-                                                &mut clip.settings.vertical,
-                                                RichText::new("9:16").size(12.0),
+                                            .add(
+                                                egui::TextEdit::multiline(&mut clip.caption)
+                                                    .desired_rows(2)
+                                                    .desired_width(f32::INFINITY),
                                             )
                                             .changed()
                                         {
                                             dirty = true;
                                         }
+                                        ui.label(
+                                            RichText::new(
+                                                clip.hashtags
+                                                    .iter()
+                                                    .map(|tag| format!("#{tag}"))
+                                                    .collect::<Vec<_>>()
+                                                    .join(" "),
+                                            )
+                                            .size(11.0)
+                                            .color(p.muted),
+                                        );
                                     }
                                 }
-                            });
-                            ui.add_space(10.0);
-                            theme::kicker(ui, p, "Refine like a human");
-                            ui.add(
-                                egui::TextEdit::singleline(&mut self.refine_text)
-                                    .hint_text("“30 seconds, tighter, captions off”")
-                                    .desired_width(f32::INFINITY),
-                            );
-                            ui.horizontal_wrapped(|ui| {
-                                for suggestion in
-                                    ["30 seconds", "tighter", "start 2s later", "captions off"]
-                                {
-                                    if theme::quiet(ui, p, suggestion).clicked() {
-                                        self.refine_text = suggestion.to_string();
+                                ui.add_space(10.0);
+                                ui.horizontal_wrapped(|ui| {
+                                    if let Some(project) = self.project.as_mut() {
+                                        if let Some(clip) = project.clips.get_mut(self.selected) {
+                                            if ui
+                                                .checkbox(
+                                                    &mut clip.settings.captions_enabled,
+                                                    RichText::new("captions").size(12.0),
+                                                )
+                                                .changed()
+                                            {
+                                                dirty = true;
+                                            }
+                                            if ui
+                                                .checkbox(
+                                                    &mut clip.settings.vertical,
+                                                    RichText::new("9:16").size(12.0),
+                                                )
+                                                .changed()
+                                            {
+                                                dirty = true;
+                                            }
+                                        }
                                     }
-                                }
-                            });
-                            if ui
-                                .add(
-                                    egui::Button::new(
-                                        RichText::new("Apply edit").strong().color(p.accent_ink),
-                                    )
-                                    .fill(p.accent)
-                                    .min_size(egui::vec2(ui.available_width(), 30.0)),
-                                )
-                                .clicked()
-                            {
-                                do_refine = true;
-                            }
-                            for change in &self.refine_log {
-                                ui.label(
-                                    RichText::new(format!("· {change}"))
-                                        .size(11.0)
-                                        .color(p.mint),
+                                });
+                                ui.add_space(10.0);
+                                theme::kicker(ui, p, "Refine like a human");
+                                ui.add(
+                                    egui::TextEdit::singleline(&mut self.refine_text)
+                                        .hint_text("“30 seconds, tighter, captions off”")
+                                        .desired_width(f32::INFINITY),
                                 );
-                            }
-                            ui.add_space(12.0);
-                            ui.separator();
-                            ui.add_space(8.0);
-                            theme::kicker(ui, p, "Export");
-                            ui.label(
-                                RichText::new(
-                                    "Raw keeps your options. Rendered keeps your dignity.",
-                                )
-                                .size(11.0)
-                                .color(p.faint),
-                            );
-                            ui.add_space(6.0);
-                            if theme::secondary(ui, p, "Preview this cut").clicked() {
-                                do_preview = true;
-                            }
-                            ui.horizontal(|ui| {
-                                if theme::secondary(ui, p, "Raw (trim only)").clicked() {
-                                    do_export = Some(ExportKind::Raw);
-                                }
+                                ui.horizontal_wrapped(|ui| {
+                                    for suggestion in
+                                        ["30 seconds", "tighter", "start 2s later", "captions off"]
+                                    {
+                                        if theme::quiet(ui, p, suggestion).clicked() {
+                                            self.refine_text = suggestion.to_string();
+                                        }
+                                    }
+                                });
                                 if ui
                                     .add(
                                         egui::Button::new(
-                                            RichText::new("Render 9:16")
+                                            RichText::new("Apply edit")
                                                 .strong()
                                                 .color(p.accent_ink),
                                         )
                                         .fill(p.accent)
-                                        .min_size(egui::vec2(0.0, 32.0)),
+                                        .min_size(egui::vec2(ui.available_width(), 30.0)),
                                     )
                                     .clicked()
                                 {
-                                    do_export = Some(ExportKind::Rendered);
+                                    do_refine = true;
                                 }
-                            });
-                            ui.horizontal(|ui| {
-                                ui.label(RichText::new("Quality").size(10.5).color(p.faint));
-                                for quality in [Quality::High, Quality::Balanced, Quality::Small] {
-                                    if ui
-                                        .selectable_label(
-                                            self.quality == quality,
-                                            RichText::new(quality.label()).size(10.5),
-                                        )
-                                        .clicked()
-                                    {
-                                        self.quality = quality;
-                                    }
+                                for change in &self.refine_log {
+                                    ui.label(
+                                        RichText::new(format!("· {change}"))
+                                            .size(11.0)
+                                            .color(p.mint),
+                                    );
                                 }
-                            });
-                            ui.add_space(8.0);
-                            if clip.exports.is_empty() {
+                                ui.add_space(12.0);
+                                ui.separator();
+                                ui.add_space(8.0);
+                                theme::kicker(ui, p, "Export");
                                 ui.label(
                                     RichText::new(
-                                        "No files yet. The good part is still theoretical.",
+                                        "Raw keeps your options. Rendered keeps your dignity.",
                                     )
                                     .size(11.0)
                                     .color(p.faint),
                                 );
-                            }
-                            for record in clip.exports.iter().rev().take(3) {
+                                ui.add_space(6.0);
+                                if theme::secondary(ui, p, "Preview this cut").clicked() {
+                                    do_preview = true;
+                                }
                                 ui.horizontal(|ui| {
-                                    ui.label(
-                                        RichText::new(format!(
-                                            "{} · {}",
-                                            match record.kind {
-                                                ExportKind::Raw => "raw",
-                                                ExportKind::Rendered => "short",
-                                            },
-                                            human_bytes(record.bytes)
-                                        ))
-                                        .size(10.5)
-                                        .color(p.muted),
-                                    );
-                                    if theme::quiet(ui, p, "Open").clicked() {
-                                        open_path(&record.path);
+                                    if theme::secondary(ui, p, "Raw (trim only)").clicked() {
+                                        do_export = Some(ExportKind::Raw);
+                                    }
+                                    if ui
+                                        .add(
+                                            egui::Button::new(
+                                                RichText::new("Render 9:16")
+                                                    .strong()
+                                                    .color(p.accent_ink),
+                                            )
+                                            .fill(p.accent)
+                                            .min_size(egui::vec2(0.0, 32.0)),
+                                        )
+                                        .clicked()
+                                    {
+                                        do_export = Some(ExportKind::Rendered);
                                     }
                                 });
-                            }
-                        });
+                                ui.horizontal(|ui| {
+                                    ui.label(RichText::new("Quality").size(10.5).color(p.faint));
+                                    for quality in
+                                        [Quality::High, Quality::Balanced, Quality::Small]
+                                    {
+                                        if ui
+                                            .selectable_label(
+                                                self.quality == quality,
+                                                RichText::new(quality.label()).size(10.5),
+                                            )
+                                            .clicked()
+                                        {
+                                            self.quality = quality;
+                                        }
+                                    }
+                                });
+                                ui.add_space(8.0);
+                                if clip.exports.is_empty() {
+                                    ui.label(
+                                        RichText::new(
+                                            "No files yet. The good part is still theoretical.",
+                                        )
+                                        .size(11.0)
+                                        .color(p.faint),
+                                    );
+                                }
+                                for record in clip.exports.iter().rev().take(3) {
+                                    ui.horizontal(|ui| {
+                                        ui.label(
+                                            RichText::new(format!(
+                                                "{} · {}",
+                                                match record.kind {
+                                                    ExportKind::Raw => "raw",
+                                                    ExportKind::Rendered => "short",
+                                                },
+                                                human_bytes(record.bytes)
+                                            ))
+                                            .size(10.5)
+                                            .color(p.muted),
+                                        );
+                                        if theme::quiet(ui, p, "Open").clicked() {
+                                            open_path(&record.path);
+                                        }
+                                    });
+                                }
+                            });
+                    });
                 });
         });
 
@@ -1643,6 +1735,46 @@ impl eframe::App for ClipfarmApp {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
         self.poll_jobs(ctx);
         self.ensure_thumbnails(ctx);
+
+        // Headless verification mode: let the layout settle, ask the backend for
+        // a framebuffer capture, write it, then exit. Used by CI and by anyone
+        // reviewing the UI without a desktop session.
+        if self.screenshot_path.is_some() {
+            self.screenshot_frames += 1;
+            let mut captured = None;
+            for event in ctx.input(|input| input.events.clone()) {
+                if let egui::Event::Screenshot { image, .. } = event {
+                    captured = Some(image);
+                }
+            }
+            if let Some(image) = captured {
+                if let Some(path) = &self.screenshot_path {
+                    let width = image.width() as u32;
+                    let height = image.height() as u32;
+                    let mut bytes = Vec::with_capacity(image.pixels.len() * 4);
+                    for pixel in &image.pixels {
+                        bytes.extend_from_slice(&pixel.to_array());
+                    }
+                    match ::image::save_buffer(
+                        path,
+                        &bytes,
+                        width,
+                        height,
+                        ::image::ColorType::Rgba8,
+                    ) {
+                        Ok(()) => eprintln!("screenshot written to {}", path.display()),
+                        Err(error) => eprintln!("screenshot failed: {error}"),
+                    }
+                }
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                return;
+            }
+            if !self.screenshot_requested && self.screenshot_frames > 8 {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(egui::UserData::default()));
+                self.screenshot_requested = true;
+            }
+            ctx.request_repaint();
+        }
         let p = theme::palette(self.dark);
         theme::apply(ctx, &p);
 
@@ -1756,6 +1888,15 @@ impl eframe::App for ClipfarmApp {
                 }
             });
     }
+}
+
+fn compact(text: &str, max: usize) -> String {
+    if text.chars().count() <= max {
+        return text.to_string();
+    }
+    let mut shortened: String = text.chars().take(max.saturating_sub(1)).collect();
+    shortened.push('…');
+    shortened
 }
 
 fn open_path(path: &Path) {

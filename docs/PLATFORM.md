@@ -57,10 +57,15 @@ This rewrite was developed and verified on a headless Linux sandbox:
   refine, raw export, 1080×1920 render.
 - The integration test fixtures and assertions are in
   `crates/clipfarm-core/tests/ffmpeg_pipeline.rs`.
-- **The desktop window was not opened in this environment** (no X11/Wayland display,
-  no Xvfb, no window manager). The app compiles, links and packages, but layout, fonts,
-  DPI behavior and interaction need a manual pass on macOS, Windows and a desktop Linux
-  session. Do not treat a successful build as visual verification.
+- The UI was rendered headlessly (Xvfb + Mesa software GL, 1440×900) and captured in
+  `docs/screenshots/`. That pass caught and fixed a real layout leak: the clips
+  inspector inherited a horizontal layout and ran off-screen. It also exposed
+  invisible slider rails and a duplicated clip-card line.
+- A real window manager, HiDPI scaling, keyboard focus, file pickers and GPU drivers
+  still need a manual pass on macOS, Windows and a desktop Linux session.
+- Screenshot mode is a verification aid, not a shipping feature:
+  `clipfarm-app --screenshot out.png [--light] [--project <id>] [--prefill <text>]`
+  renders one frame and exits. It is how the README images were produced.
 - Whisper.cpp, a whisper model and Ollama were not installed, so those paths were
   exercised only through their parsers, guards and graceful-degradation branches.
 

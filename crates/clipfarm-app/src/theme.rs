@@ -77,8 +77,10 @@ pub fn apply(ctx: &Context, p: &Palette) {
     visuals.override_text_color = Some(p.ink);
     visuals.faint_bg_color = p.card_alt;
     visuals.widgets.noninteractive.bg_fill = p.panel;
-    visuals.widgets.inactive.bg_fill = p.card;
-    visuals.widgets.inactive.weak_bg_fill = p.card;
+    // Slider rails and inactive controls use this fill; card-on-card would be
+    // invisible, so step it up one level.
+    visuals.widgets.inactive.bg_fill = p.card_alt;
+    visuals.widgets.inactive.weak_bg_fill = p.card_alt;
     visuals.widgets.hovered.bg_fill = p.card_alt;
     visuals.widgets.hovered.weak_bg_fill = p.card_alt;
     visuals.widgets.active.bg_fill = p.accent;
@@ -115,11 +117,15 @@ pub fn apply(ctx: &Context, p: &Palette) {
     .into();
     style.spacing.item_spacing = egui::vec2(8.0, 8.0);
     style.spacing.button_padding = egui::vec2(12.0, 7.0);
+    style.spacing.slider_width = 170.0;
     ctx.set_style(style);
 }
 
 pub fn card_frame(p: &Palette) -> Frame {
-    Frame::default().fill(p.card).inner_margin(Margin::same(18))
+    Frame::default()
+        .fill(p.card)
+        .stroke(egui::Stroke::new(1.0_f32, p.line))
+        .inner_margin(Margin::same(18))
 }
 
 pub fn flat_frame(p: &Palette) -> Frame {
