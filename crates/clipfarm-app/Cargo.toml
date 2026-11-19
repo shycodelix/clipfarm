@@ -59,7 +59,5 @@ short-version = "${CARGO_PACKAGER_VERSION}"
 [target.'cfg(linux)'.package.metadata.packager]
 short-version = "${CARGO_PACKAGER_VERSION}"
 
-[[package.metadata.packager.signing]]
-# Temporarily disable signing until macOS/Windows code-signing secrets are provided.
-# See docs/PLATFORM.md for the recommended signing setup.
-kind = "no-signing"
+# Signing is intentionally left disabled until macOS/Windows code-signing secrets
+# are provided. See docs/PLATFORM.md for the recommended signing setup.
