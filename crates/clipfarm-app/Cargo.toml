@@ -27,14 +27,35 @@ description = "Long video in. Shorts out. A local-first Rust clipping studio."
 icons = ["../../build/icon.png"]
 out-dir = "../../dist"
 
+# The CLI binary is built from the sibling crate. We tell the packager to wrap it
+# alongside the app so each installer also ships `clipfarm` (the CLI).
+#
+# `binaries-dir` is the directory that contains the compiled binaries this config
+# refers to. In CI it is `target/<target>/release` (set explicitly), and locally it
+# defaults to `out-dir` when binaries-dir is omitted.
+binaries-dir = "../../target/release"
+binaries = [
+  # The desktop app is the main binary the installer is built around.
+  { path = "clipfarm-app", main = true },
+  # The CLI lives alongside the app so every platform installer ships `clipfarm`.
+  { path = "clipfarm" },
+]
+
+# Desktop integration is useful on Linux; keep it on by default.
+[linux]
+generate-desktop-entry = true
+
+# Windows: per-user install keeps the uninstaller and shortcuts user-scoped.
 [target.'cfg(windows)'.package.metadata.packager]
 short-version = "${CARGO_PACKAGER_VERSION}"
 windows-install-mode = "currentUser"
 application-verifier = false
 
+# macOS: DMG ships the .app plus the CLI next to it; version from env.
 [target.'cfg(macos)'.package.metadata.packager]
 short-version = "${CARGO_PACKAGER_VERSION}"
 
+# Linux: .deb ships the app and the CLI; version from env.
 [target.'cfg(linux)'.package.metadata.packager]
 short-version = "${CARGO_PACKAGER_VERSION}"
 

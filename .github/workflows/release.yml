@@ -1,5 +1,10 @@
 name: release
 
+# Build platform installers on every tag and on workflow_dispatch. Each installer
+# ships the desktop app and the `clipfarm` CLI so the CLI is available from the
+# install location on every platform. Windows keeps its Start menu/Desktop shortcuts
+# and uninstaller; macOS puts the CLI next to the .app in the DMG; Linux puts the CLI
+# under /usr/bin so it is on PATH after install.
 on:
   workflow_dispatch:
   push:
@@ -84,7 +89,8 @@ jobs:
             --target ${{ matrix.target }} \
             -p clipfarm-app \
             -f ${{ matrix.formats }} \
-            --output-dir dist
+            --output-dir dist \
+            --bundle-options binaries-dir=target/${{ matrix.target }}/release
 
       - name: Upload installers
         uses: actions/upload-artifact@v4
