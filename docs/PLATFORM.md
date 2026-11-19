@@ -57,8 +57,8 @@ CARGO_PACKAGER_VERSION=0.2.0 cargo packager --release -p clipfarm-app -f dmg
 | Linux | `.deb` | cargo-packager + dpkg | System package (requires sudo) |
 
 Each installer ships the `clipfarm-app` binary and a desktop integration entry. The CLI
-binary (`clipfarm`) is included where the packaging step includes it; see
-`docs/INSTALLERS.md` for per-platform placement notes.
+binary (`clipfarm`) is included where the packaging step includes it; per-platform
+placement details are in the macOS DMG and Windows installer sections below.
 
 ### Windows installer (NSIS)
 
