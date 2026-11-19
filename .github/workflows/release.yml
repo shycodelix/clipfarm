@@ -82,6 +82,7 @@ jobs:
         run: cargo build --release --target ${{ matrix.target }} -p clipfarm-cli -p clipfarm-app
 
       - name: Package
+        shell: bash
         env:
           CARGO_PACKAGER_VERSION: ${{ steps.version.outputs.version }}
         run: |
