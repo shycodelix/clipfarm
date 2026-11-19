@@ -38,4 +38,8 @@ desktop.ini
 
 # Logs
 *.log
-dist/
+
+# Packager output
+/dist/
+/rebuilt/
+crates/clipfarm-app/dist/
