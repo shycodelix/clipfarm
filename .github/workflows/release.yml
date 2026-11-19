@@ -91,14 +91,27 @@ jobs:
             --target ${{ matrix.target }} \
             -p clipfarm-app \
             -f ${{ matrix.formats }} \
-            --out-dir dist \
-            --binaries-dir target/${{ matrix.target }}/release
+            --out-dir ../../dist \
+            --binaries-dir ../../target/${{ matrix.target }}/release
+
+      - name: Rebuild .deb with dpkg-deb (cargo-packager ar header fix)
+        if: matrix.formats == 'deb'
+        run: |
+          STAGING=$(find crates/clipfarm-app/dist/.cargo-packager/deb -type d -name "*amd64*" -o -name "*$(echo ${{ matrix.target }} | tr '-' '_')*" | head -1)
+          mkdir -p rebuilt/DEBIAN
+          cp "$STAGING/control/control" rebuilt/DEBIAN/
+          cp "$STAGING/control/md5sums" rebuilt/DEBIAN/
+          cp -r "$STAGING/data" rebuilt/
+          dpkg-deb --build rebuilt dist/clipfarm-${{ matrix.target }}.deb
 
       - name: Upload installers
         uses: actions/upload-artifact@v4
         with:
           name: clipfarm-${{ matrix.formats }}-${{ matrix.target }}
-          path: dist/**/*
+          path: |
+            dist/*.deb
+            dist/*.dmg
+            dist/*.exe
           if-no-files-found: error
 
   attach:
