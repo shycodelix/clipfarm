@@ -15,6 +15,9 @@ permissions:
   packages: write
 
 jobs:
+  # Linux + Windows are required for a release. macOS runners are
+  # intermittently unavailable on shared GitHub runners, so macOS is
+  # built in a separate matrix that does not block the attach job.
   installers:
     name: build (${{ matrix.display }})
     runs-on: ${{ matrix.runner }}
@@ -26,16 +29,6 @@ jobs:
             runner: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             formats: deb
-
-          - display: macOS DMG (x86_64)
-            runner: macos-latest
-            target: x86_64-apple-darwin
-            formats: dmg
-
-          - display: macOS DMG (ARM64)
-            runner: macos-latest
-            target: aarch64-apple-darwin
-            formats: dmg
 
           - display: Windows NSIS (x86_64)
             runner: windows-latest
@@ -57,10 +50,6 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             ffmpeg libxkbcommon-dev libwayland-dev libx11-dev
-
-      - name: Prereqs (macOS)
-        if: runner.os == 'macOS'
-        run: brew install ffmpeg
 
       - name: Prereqs (Windows)
         if: runner.os == 'Windows'
@@ -105,6 +94,72 @@ jobs:
           cp "$STAGING/control/md5sums" rebuilt/DEBIAN/
           cp -r "$STAGING/data" rebuilt/
           dpkg-deb --build rebuilt dist/clipfarm-${{ matrix.target }}.deb
+
+      - name: Upload installers
+        uses: actions/upload-artifact@v4
+        with:
+          name: clipfarm-${{ matrix.formats }}-${{ matrix.target }}
+          path: |
+            dist/*.deb
+            dist/*.dmg
+            dist/*.exe
+          if-no-files-found: error
+
+  installers-macos:
+    name: build (${{ matrix.display }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - display: macOS DMG (x86_64)
+            runner: macos-latest
+            target: x86_64-apple-darwin
+            formats: dmg
+
+          - display: macOS DMG (ARM64)
+            runner: macos-latest
+            target: aarch64-apple-darwin
+            formats: dmg
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          target: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Prereqs (macOS)
+        run: brew install ffmpeg
+
+      - name: Version from tag
+        id: version
+        shell: bash
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            ver="${GITHUB_REF_NAME#v}"
+          else
+            ver="0.0.0-dev"
+          fi
+          echo "version=$ver" >> "$GITHUB_OUTPUT"
+
+      - name: Build release binaries
+        run: cargo build --release --target ${{ matrix.target }} -p clipfarm-cli -p clipfarm-app
+
+      - name: Package
+        shell: bash
+        env:
+          CARGO_PACKAGER_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          cargo install cargo-packager --locked
+          cargo packager --release \
+            --target ${{ matrix.target }} \
+            -p clipfarm-app \
+            -f ${{ matrix.formats }} \
+            --out-dir ../../dist \
+            --binaries-dir ../../target/${{ matrix.target }}/release
 
       - name: Upload installers
         uses: actions/upload-artifact@v4
