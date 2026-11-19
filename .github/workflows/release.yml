@@ -3,8 +3,8 @@ name: release
 # Build platform installers on every tag and on workflow_dispatch. Each installer
 # ships the desktop app and the `clipfarm` CLI so the CLI is available from the
 # install location on every platform. Windows keeps its Start menu/Desktop shortcuts
-# and uninstaller; macOS puts the CLI next to the .app in the DMG; Linux puts the CLI
-# under /usr/bin so it is on PATH after install.
+# and uninstaller; macOS ships the CLI inside the .app bundle (Contents/MacOS/clipfarm)
+# and Linux puts the CLI under /usr/bin so it is on PATH after install.
 on:
   workflow_dispatch:
   push:

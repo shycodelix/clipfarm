@@ -50,7 +50,10 @@ short-version = "${CARGO_PACKAGER_VERSION}"
 windows-install-mode = "currentUser"
 application-verifier = false
 
-# macOS: DMG ships the .app plus the CLI next to it; version from env.
+# macOS: DMG ships the .app bundle, which contains the CLI inside it at
+# Contents/MacOS/clipfarm (cargo-packager puts every binary from the `binaries`
+# list into the .app's Contents/MacOS/ directory). The CLI is not on PATH; it is
+# available from the app bundle or from a source/build checkout.
 [target.'cfg(macos)'.package.metadata.packager]
 short-version = "${CARGO_PACKAGER_VERSION}"
 
