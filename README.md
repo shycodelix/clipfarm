@@ -16,6 +16,26 @@ long VOD ──► speech/VAD ──► clip planning ──► review ──┬
              + whisper.cpp    (hooks, scores)          └─► 9:16 short + captions
 ```
 
+## Download
+
+| Platform | Link |
+| --- | --- |
+| **macOS** (Apple silicon & Intel, `.dmg`) | _Coming soon_ — queued in CI (macOS runners unavailable at the moment) |
+| **Windows** (NSIS installer, `.exe`) | [clipfarm-app_0.2.0_x64-setup.exe](https://github.com/shycodelix/clipfarm/releases/download/v0.2.0/clipfarm-app_0.2.0_x64-setup.exe) |
+| **Linux** (Debian/Ubuntu, `.deb`) | [clipfarm-x86_64-unknown-linux-gnu.deb](https://github.com/shycodelix/clipfarm/releases/download/v0.2.0/clipfarm-x86_64-unknown-linux-gnu.deb) |
+
+Past releases are in [Releases](https://github.com/shycodelix/clipfarm/releases).
+
+### What the installers include
+
+Each installer ships the **`clipfarm`** CLI as well as the desktop app:
+
+- **Windows** — CLI added to PATH during install; Start menu and Desktop shortcuts;
+  built-in uninstaller.
+- **Linux** — CLI at `/usr/bin/clipfarm` (and `/usr/bin/clipfarm-app`); desktop entry.
+- **macOS** — CLI lives inside the `.app` bundle at `clipfarm.app/Contents/MacOS/clipfarm`
+  (run it from Terminal, or add a symlink).
+
 ## Screenshots
 
 Both rooms in both palettes, rendered from the real app (headless Linux, 1440×900):
@@ -131,10 +151,7 @@ GitHub Releases:
 | Windows | NSIS `.exe` | Per-user installer with Start menu/Desktop shortcuts and an uninstaller |
 | Linux | `.deb` | System package with a desktop entry |
 
-Grab them from **Releases** once the repository has been published and a `v*` tag has been
-pushed. Local packaging is documented in [docs/PLATFORM.md](docs/PLATFORM.md).
-
-### 2. Terminal / package manager
+Grab them from the **Download** section above (or [Releases](https://github.com/shycodelix/clipfarm/releases) for older versions). Local packaging is documented in [docs/PLATFORM.md](docs/PLATFORM.md).
 
 ```bash
 # From a git checkout, anywhere Rust is installed
@@ -144,7 +161,7 @@ cargo install --git https://github.com/<your-account>/clipfarm clipfarm-cli
 # cargo install until they are.
 ```
 
-### 3. Build from source
+### Build from source
 
 ```bash
 git clone https://github.com/<your-account>/clipfarm.git
