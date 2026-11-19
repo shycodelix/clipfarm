@@ -134,6 +134,10 @@ impl Tools {
 
     /// Pick the best available H.264 encoder. Returns a friendly, human-readable
     /// name plus the encoder ID.
+    ///
+    /// Some FFmpeg builds advertise hardware encoders they cannot actually open
+    /// (common in CI/container runners). We probe the chosen encoder with a
+    /// trivial encode and fall back to `libx264` when it is not usable.
     pub fn hardware_encoder(&self) -> Option<(&'static str, &'static str)> {
         let output = Command::new(&self.ffmpeg)
             .args(["-hide_banner", "-encoders"])
@@ -151,6 +155,13 @@ impl Tools {
         candidates
             .into_iter()
             .find(|(encoder, _)| list.contains(encoder))
+            .and_then(|(encoder, label)| {
+                if encoder_is_usable(&self.ffmpeg, encoder) {
+                    Some((encoder, label))
+                } else {
+                    None
+                }
+            })
     }
 
     pub fn ffmpeg_version(&self) -> Option<String> {
@@ -174,6 +185,45 @@ impl Tools {
             ));
         }
         Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    }
+}
+
+fn encoder_is_usable(ffmpeg: &Path, encoder: &str) -> bool {
+    // One frame, one pixel, one second, explicit parameters. Failures here (not
+    // just missing encoder entries) mean this machine cannot use that encoder.
+    let output = Command::new(ffmpeg)
+        .args([
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc2=size=16x16:rate=1:duration=1",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=frequency=1000:sample_rate=8000:duration=1",
+            "-c:v",
+            encoder,
+            "-preset",
+            "fast",
+            "-pix_fmt",
+            "yuv420p",
+            "-c:a",
+            "aac",
+            "-shortest",
+            "-t",
+            "1",
+            "pipe:1",
+        ])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .output();
+    match output {
+        Ok(out) => out.status.success(),
+        Err(_) => false,
     }
 }
 
