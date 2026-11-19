@@ -30,10 +30,9 @@ out-dir = "../../dist"
 # The CLI binary is built from the sibling crate. We tell the packager to wrap it
 # alongside the app so each installer also ships `clipfarm` (the CLI).
 #
-# `binaries-dir` is the directory that contains the compiled binaries this config
-# refers to. In CI it is `target/<target>/release` (set explicitly), and locally it
-# defaults to `out-dir` when binaries-dir is omitted.
-binaries-dir = "../../target/release"
+# `binaries-dir` is set via the CLI (--binaries-dir) in CI and locally so the
+# packager finds the compiled binaries for the right target. When omitted it
+# defaults to the out-dir.
 binaries = [
   # The desktop app is the main binary the installer is built around.
   { path = "clipfarm-app", main = true },
