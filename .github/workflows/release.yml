@@ -97,7 +97,9 @@ jobs:
       - name: Rebuild .deb with dpkg-deb (cargo-packager ar header fix)
         if: matrix.formats == 'deb'
         run: |
-          STAGING=$(find crates/clipfarm-app/dist/.cargo-packager/deb -type d -name "*amd64*" -o -name "*$(echo ${{ matrix.target }} | tr '-' '_')*" | head -1)
+          STAGING=$(find crates/clipfarm-app/dist/.cargo-packager/deb dist/.cargo-packager/deb -type d -name "*amd64*" -o -name "*$(echo ${{ matrix.target }} | tr '-' '_')*" 2>/dev/null | head -1)
+          if [ -z "$STAGING" ]; then echo "ERROR: staging dir not found"; exit 1; fi
+          echo "Staging: $STAGING"
           mkdir -p rebuilt/DEBIAN
           cp "$STAGING/control/control" rebuilt/DEBIAN/
           cp "$STAGING/control/md5sums" rebuilt/DEBIAN/
