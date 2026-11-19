@@ -608,22 +608,17 @@ impl ClipfarmApp {
 
     /// Sidebar: brand, navigation, and the engine pulse.
     fn sidebar(&mut self, ui: &mut Ui, p: &Palette) {
-        ui.set_width(206.0);
-        ui.horizontal(|ui| {
-            theme::logo(ui, p, 38.0);
-            ui.add_space(4.0);
-            ui.vertical(|ui| {
-                ui.label(RichText::new("clipfarm").size(20.0).strong().color(p.ink));
-                ui.label(RichText::new("local clip studio").size(10.5).color(p.faint));
-            });
-        });
+        ui.set_width(238.0);
+        // Brand lockup: mark + wordmark with tracking. The sidebar is now a
+        // touch wider to breathe around the wordmark.
+        let _ = theme::brand(ui, p, 38.0);
         ui.add_space(22.0);
         theme::kicker(ui, p, "Workspace");
         ui.add_space(4.0);
         for screen in [Screen::Farm, Screen::Clips, Screen::Trends, Screen::Tuning] {
             let selected = self.screen == screen;
             let response = ui.add_sized(
-                [194.0, 34.0],
+                [206.0, 34.0],
                 egui::Button::new(RichText::new(screen.label()).size(13.0).color(if selected {
                     p.ink
                 } else {
@@ -675,13 +670,14 @@ impl ClipfarmApp {
                 ui.label(RichText::new(label).size(11.0).color(p.muted));
             });
             ui.label(
-                RichText::new("no cloud · no credits · v0.2")
+                RichText::new("clipfarm · long video in, shorts out")
                     .size(10.0)
-                    .color(p.faint),
+                    .strong()
+                    .color(p.muted),
             );
             ui.add_space(10.0);
             ui.label(
-                RichText::new("Every render is free because nothing leaves this machine.")
+                RichText::new("No cloud, no credits — every render stays on this machine.")
                     .size(10.5)
                     .color(p.faint),
             );
@@ -723,6 +719,12 @@ impl ClipfarmApp {
     }
 
     fn screen_farm(&mut self, ui: &mut Ui, p: &Palette) {
+        // Brand header: mark lockup + wordmark at the top of the canvas so the
+        // app reads as clipfarm before any content.
+        ui.horizontal(|ui| {
+            let _ = theme::brand(ui, p, 46.0);
+        });
+        ui.add_space(18.0);
         ui.label(
             RichText::new("Feed the algorithm something worth watching.")
                 .size(30.0)

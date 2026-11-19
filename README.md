@@ -2,6 +2,8 @@
 
 **Long video in. Shorts out. No cloud, no credits.**
 
+![clipfarm app icon](build/icon.png)
+
 clipfarm is a desktop clipping studio for turning a stream, podcast or local recording
 into review-ready short-form clips. It pulls the VOD, finds the moments worth posting,
 caps every clip at **60 seconds**, captions them, reframes to 9:16, and exports — or

@@ -1,4 +1,4 @@
-use egui::{Color32, Context, Frame, Margin, Response, RichText, Ui};
+use egui::{Color32, Context, FontFamily, FontId, Frame, Margin, Response, RichText, Ui};
 
 /// Warm ink, one loud coral, a mint for good news. Deliberately not the default
 /// "AI dashboard" purple-and-teal.
@@ -177,49 +177,160 @@ pub fn chip(ui: &mut Ui, fill: Color32, text_color: Color32, text: &str) -> Resp
         .inner
 }
 
-/// The wordmark: a play triangle inside a soft square, plus three field rows.
-pub fn logo(ui: &mut Ui, p: &Palette, size: f32) {
-    let (rect, _) = ui.allocate_exact_size(egui::vec2(size, size), egui::Sense::hover());
-    let painter = ui.painter();
-    painter.rect_filled(rect, size * 0.26, p.accent);
-    let inner = rect.shrink(size * 0.24);
-    let center = inner.center();
-    let triangle = vec![
-        egui::pos2(center.x - inner.width() * 0.18, inner.top()),
-        egui::pos2(center.x - inner.width() * 0.18, inner.bottom()),
-        egui::pos2(inner.right(), center.y),
+/// Lighten an sRGB color toward white by `t` (0 = unchanged, 1 = white).
+fn lighten(c: Color32, t: f32) -> Color32 {
+    let t = t.max(0.0).min(1.0);
+    Color32::from_rgb(
+        (c.r() as f32 + (255.0 - c.r() as f32) * t) as u8,
+        (c.g() as f32 + (255.0 - c.g() as f32) * t) as u8,
+        (c.b() as f32 + (255.0 - c.b() as f32) * t) as u8,
+    )
+}
+
+/// The clipfarm mark: a coral squircle with a soft highlight, a dark rounded
+/// "clip card" containing a play triangle, and three crop-row ticks near the
+/// card's bottom edge (the reframe-to-9:16 signature).
+///
+/// Geometry is scaled from scripts/make-icon.py so the in-app mark reads as the
+/// same logo as the app icon: card center offset -30/1024, card fraction
+/// 0.586, card radius 78/1024, play triangle vertices (-0.18,-0.28)..(0.383,0.05)
+/// in card-local fractions, and three ticks at card-fraction y=+0.425.
+pub fn mark(painter: &egui::Painter, rect: egui::Rect, p: &Palette) {
+    // Use the smaller dim so the mark stays square-proportional on squished rects.
+    let s = rect.width().min(rect.height());
+    let cw = rect.center().x;
+    let ch = rect.center().y;
+
+    // Coral squircle background (corner radius 224/1024).
+    painter.rect_filled(rect, s * 0.21875, p.accent);
+
+    // Soft upper-left highlight (coral-tinted sheen).
+    painter.rect_filled(
+        egui::Rect::from_min_size(
+            egui::pos2(rect.left() + s * 0.293, rect.top() + s * 0.215),
+            egui::vec2(s * 0.488, s * 0.391),
+        ),
+        s * 0.21875,
+        lighten(p.accent, 0.85),
+    );
+
+    // Dark rounded "clip card" (square, fraction 0.586, center offset -30/1024).
+    let card = egui::Rect::from_center_size(
+        egui::pos2(cw, ch - s * 0.0293),
+        egui::vec2(s * 0.5859, s * 0.5859),
+    );
+    let card_radius = s * 0.0762;
+    painter.rect_filled(card, card_radius, p.accent_ink);
+
+    // Thin light rim for definition.
+    painter.rect_stroke(
+        card,
+        card_radius,
+        egui::Stroke::new(s * 0.0117, Color32::from_rgb(255, 255, 255).gamma_multiply(0.20)),
+        egui::StrokeKind::Outside,
+    );
+
+    // Play triangle (card-local fractions of the icon's 600-wide card).
+    let c_cx = card.center().x;
+    let c_cy = card.center().y;
+    let tri = vec![
+        egui::pos2(c_cx + s * 0.18 * (-1.0), c_cy + s * 0.28 * (-1.0)),
+        egui::pos2(c_cx + s * 0.18 * (-1.0), c_cy + s * 0.38 * 1.0),
+        egui::pos2(c_cx + s * 0.383 * 1.0, c_cy + s * 0.05 * 1.0),
     ];
     painter.add(egui::Shape::convex_polygon(
-        triangle,
-        p.accent_ink,
+        tri,
+        Color32::from_rgb(250, 244, 236),
         egui::Stroke::NONE,
     ));
-    let bar = size * 0.06;
-    let y = rect.bottom() - size * 0.12;
-    painter.rect_filled(
-        egui::Rect::from_min_size(
-            egui::pos2(rect.left() + size * 0.2, y),
-            egui::vec2(size * 0.22, bar),
-        ),
-        1.0,
-        p.accent_ink,
+
+    // Three crop-row ticks near the card's bottom edge (card-fraction y +0.425).
+    let tick_cy = c_cy + s * 0.425;
+    let tick_h = s * 0.0449; // 46/1024
+    let tick_r = tick_h * 0.5;
+    let ticks: &[(&str, f32, f32)] = &[
+        ("left", -0.178, 0.25),
+        ("mid", 0.0, 0.0367),
+        ("right", 0.162, 0.25),
+    ];
+    for (_, cx_frac, w_frac) in ticks {
+        let cx = c_cx + s * cx_frac;
+        let tw = s * w_frac;
+        painter.rect_filled(
+            egui::Rect::from_center_size(egui::pos2(cx, tick_cy), egui::vec2(tw, tick_h)),
+            tick_r,
+            p.accent_ink,
+        );
+    }
+}
+
+/// Full lockup: mark + wordmark with tracking. Use in the sidebar and the
+/// farm screen header. `logomark_size` is the square the mark occupies.
+/// Returns the total width the lockup consumed (mark + spacing + text).
+pub fn brand(ui: &mut Ui, p: &Palette, logomark_size: f32) -> f32 {
+    let (mark_rect, _) = ui.allocate_exact_size(
+        egui::vec2(logomark_size, logomark_size),
+        egui::Sense::hover(),
     );
-    painter.rect_filled(
-        egui::Rect::from_min_size(
-            egui::pos2(rect.left() + size * 0.48, y),
-            egui::vec2(size * 0.08, bar),
+    mark(&ui.painter(), mark_rect, p);
+
+    let word = "clipfarm";
+    let eyebrow = "local clip studio";
+    let wordsize = logomark_size * 0.26;
+    let advance = wordsize * 0.66;
+    // Baseline sits slightly below the mark center so caps align with the card.
+    let baseline = mark_rect.center().y + wordsize * 0.18;
+
+    let painter = ui.painter();
+    let mut x = mark_rect.right() + logomark_size * 0.07;
+    for ch in word.chars() {
+        painter.text(
+            egui::pos2(x, baseline),
+            egui::Align2::LEFT_BOTTOM,
+            ch.to_string(),
+            FontId::new(wordsize, FontFamily::Proportional),
+            p.ink,
+        );
+        x += advance;
+    }
+    let text_width = word.len() as f32 * advance;
+    let total = (mark_rect.right() - mark_rect.left()) + logomark_size * 0.07 + text_width;
+
+    // Eyebrow under the wordmark, left-aligned with the wordmark start.
+    painter.text(
+        egui::pos2(
+            mark_rect.right() + logomark_size * 0.07,
+            baseline + wordsize * 0.55,
         ),
-        1.0,
-        p.accent_ink,
+        egui::Align2::LEFT_TOP,
+        eyebrow,
+        FontId::new(wordsize * 0.42, FontFamily::Proportional),
+        p.faint,
     );
-    painter.rect_filled(
-        egui::Rect::from_min_size(
-            egui::pos2(rect.left() + size * 0.62, y),
-            egui::vec2(size * 0.22, bar),
-        ),
-        1.0,
-        p.accent_ink,
-    );
+
+    total
+}
+
+/// Wordmark-only (no mark) with the same per-glyph tracking as `brand`.
+/// Returns width consumed.
+pub fn wordmark(ui: &mut Ui, p: &Palette, size: f32) -> f32 {
+    let word = "clipfarm";
+    let advance = size * 0.66;
+    let r = ui.max_rect();
+    let baseline = r.max.y + size * 0.78;
+    let painter = ui.painter();
+    let mut x = r.max.x + size * 0.02;
+    for ch in word.chars() {
+        painter.text(
+            egui::pos2(x, baseline),
+            egui::Align2::LEFT_BOTTOM,
+            ch.to_string(),
+            FontId::new(size, FontFamily::Proportional),
+            p.ink,
+        );
+        x += advance;
+    }
+    word.len() as f32 * advance
 }
 
 pub fn progress_bar(ui: &mut Ui, p: &Palette, fraction: f32, width: f32) {
