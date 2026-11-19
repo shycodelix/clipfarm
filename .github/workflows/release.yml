@@ -7,41 +7,90 @@ on:
 
 permissions:
   contents: write
+  packages: write
 
 jobs:
   installers:
-    name: installers (${{ matrix.os }})
+    name: build (${{ matrix.display }})
+    runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
+          - display: Linux .deb (x86_64)
+            runner: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
             formats: deb
-          - os: macos-latest
+
+          - display: macOS DMG (x86_64)
+            runner: macos-latest
+            target: x86_64-apple-darwin
             formats: dmg
-          - os: windows-latest
+
+          - display: macOS DMG (ARM64)
+            runner: macos-latest
+            target: aarch64-apple-darwin
+            formats: dmg
+
+          - display: Windows NSIS (x86_64)
+            runner: windows-latest
+            target: x86_64-pc-windows-msvc
             formats: nsis
-    runs-on: ${{ matrix.os }}
+
     steps:
       - uses: actions/checkout@v4
+
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          target: ${{ matrix.target }}
+
       - uses: Swatinem/rust-cache@v2
 
-      - name: Linux window dependencies
+      - name: Prereqs (Linux)
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev libwayland-dev libx11-dev
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            ffmpeg libxkbcommon-dev libwayland-dev libx11-dev
 
-      - name: Install cargo-packager
-        run: cargo install cargo-packager --locked
+      - name: Prereqs (macOS)
+        if: runner.os == 'macOS'
+        run: brew install ffmpeg
+
+      - name: Prereqs (Windows)
+        if: runner.os == 'Windows'
+        run: choco install ffmpeg -y
+
+      - name: Version from tag
+        id: version
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            # v0.2.0 -> 0.2.0
+            ver="${GITHUB_REF_NAME#v}"
+          else
+            ver="0.0.0-dev"
+          fi
+          echo "version=$ver" >> "$GITHUB_OUTPUT"
+
+      - name: Build release binaries
+        run: cargo build --release --target ${{ matrix.target }} -p clipfarm-cli -p clipfarm-app
 
       - name: Package
-        run: cargo packager --release --formats ${{ matrix.formats }}
+        env:
+          CARGO_PACKAGER_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          cargo install cargo-packager --locked
+          cargo packager --release \
+            --target ${{ matrix.target }} \
+            -p clipfarm-app \
+            -f ${{ matrix.formats }} \
+            --output-dir dist
 
       - name: Upload installers
         uses: actions/upload-artifact@v4
         with:
-          name: clipfarm-${{ matrix.os }}
-          path: dist/**
+          name: clipfarm-${{ matrix.formats }}-${{ matrix.target }}
+          path: dist/**/*
           if-no-files-found: error
 
   attach:
@@ -53,7 +102,14 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
+
+      - name: Flatten artifacts for release
+        run: |
+          mkdir -p release-assets
+          find artifacts -type f -exec cp {} release-assets/ \;
+          ls -1 release-assets
+
       - uses: softprops/action-gh-release@v2
         with:
-          files: artifacts/**/*
+          files: release-assets/*
           generate_release_notes: true

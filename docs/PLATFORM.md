@@ -25,28 +25,127 @@ Mesa's software rasterizer is sufficient; the UI is not doing video compositing.
 
 `crates/clipfarm-app/Cargo.toml` contains `[package.metadata.packager]` for
 [cargo-packager](https://github.com/crabnebula-dev/cargo-packager). Build installers
-locally or in CI:
+locally or in CI.
+
+### Local packaging
 
 ```bash
 cargo build --release -p clipfarm-app
 cargo install cargo-packager --locked
-cargo packager --release -p clipfarm-app -f deb     # Linux
-cargo packager --release -p clipfarm-app -f dmg     # macOS (run on macOS)
-cargo packager --release -p clipfarm-app -f nsis    # Windows (run on Windows)
+
+# Linux
+cargo packager --release -p clipfarm-app -f deb     # produces dist/*.deb
+
+# macOS (run on macOS)
+cargo packager --release -p clipfarm-app -f dmg     # produces dist/*.dmg
+
+# Windows (run on Windows)
+cargo packager --release -p clipfarm-app -f nsis    # produces dist/*.exe
+
+# Version is read from CARGO_PACKAGER_VERSION (or the app manifest) and used for the
+# package/version metadata. In CI it is set explicitly so the workflow and local builds
+# agree.
+CARGO_PACKAGER_VERSION=0.2.0 cargo packager --release -p clipfarm-app -f dmg
 ```
 
-The release workflow in `.github/workflows/release.yml` runs the matching command on
-each OS and uploads `dist/`. Signing/notarization secrets are intentionally not
-committed; add them as repository secrets when distributing publicly.
+### What the packageers produce
 
-**Linux result:** the `.deb` path was exercised end to end here — a 5.0 MB
-`clipfarm-app_0.2.0_amd64.deb` with an 11 MB stripped binary, `ar`-valid control and
-data archives, a desktop entry, a 1024px icon, and no unresolved shared libraries.
-macOS and Windows installers are configured but were not built in this sandbox.
+| Platform | Format | Tooling | Install scope |
+| --- | --- | --- | --- |
+| macOS | `.dmg` | cargo-packager (NSIS-less macOS bundle into a DMG) | Drag to Applications (per-user app bundle) |
+| Windows | `.exe` NSIS installer | cargo-packager + NSIS | Per-user install; optional CLI shortcut |
+| Linux | `.deb` | cargo-packager + dpkg | System package (requires sudo) |
+
+Each installer ships the `clipfarm-app` binary and a desktop integration entry. The CLI
+binary (`clipfarm`) is included where the packaging step includes it; see
+`docs/INSTALLERS.md` for per-platform placement notes.
+
+### Windows installer (NSIS)
+
+The Windows package is an NSIS installer produced by cargo-packager. The app bundle, CLI
+binary, shortcuts and an uninstaller are all configured in
+`crates/clipfarm-app/Cargo.toml` under `[package.metadata.packager]` and the NSIS profile
+`crates/clipfarm-app/nsis.toml`.
+
+Current Windows behavior (tuned for a self-contained, user-scoped install):
+
+- **Install mode:** per-user install (`currentUser`), so it does not require administrator
+  rights unless the user chooses a system-wide location.
+- **Shortcuts:** a Start menu entry (`clipfarm`) and a Desktop shortcut are created; the
+  app and CLI can be launched from there.
+- **CLI placement:** the CLI binary is included in the install and can be opened from the
+  Start menu. Workflow and install profile can be adjusted to also offer a PATH-friendly
+  choice; by default the installer does not modify machine PATH, so `clipfarm` is easiest
+  to run from the shortcut, the Start menu, or the install directory.
+- **Uninstaller:** the NSIS install registers an entry in Add/Remove programs and an
+  uninstaller that removes the app, CLI, shortcuts and install directory when invoked.
+
+### macOS DMG
+
+The macOS DMG is a drag-to-Applications image. It does not include a system-wide CLI
+install or an installer script beyond the app bundle itself. To also make `clipfarm` CLI
+available on PATH on macOS you can either:
+
+- add a post-install script to the DMG that symlinks or copies the CLI into a PATH
+  location chosen by the user, or
+- ship a separate Homebrew/Linuxbrew-style formula (planned, not yet published).
+
+Until that is added, the macOS route gives you the desktop app; the CLI is available from
+the app bundle's `clipfarm` binary or from a source/build checkout.
+
+### Linux `.deb`
+
+The `.deb` installs the app and a desktop entry. Whether the CLI is placed on PATH depends
+on the packager profile; the current profile installs the app and puts the binary in the
+package so it is available from the install location and the terminal, and registers a
+desktop file and icon.
+
+This package was exercised end to end in this repo: a 5.0 MB
+`clipfarm-app_0.2.0_amd64.deb` with a stripped binary, `ar`-valid control and data
+archives, a desktop entry, a 1024px icon, and no unresolved shared libraries.
 
 > Container note: cargo-packager writes the running UID into the `ar` header, whose
 owner field is six digits. If your build container uses an oversized UID, package inside
 `unshare -r` or on the host/CI, otherwise `dpkg-deb` reports a corrupt archive.
+
+### Versioning
+
+Package version is derived from the git tag in CI (`v0.2.0` -> `0.2.0`) so the installer
+version matches the release. On `workflow_dispatch` from `main` (no tag) the version is
+`0.0.0-dev` and you should push a tag to publish real release artifacts. Local builds use
+whatever `CARGO_PACKAGER_VERSION` you set, or fall back to the workspace version.
+
+### Signing, notarization and distribution
+
+Signing and notarization secrets are intentionally not committed. When you are distributing
+publicly:
+
+- **macOS:** provide a Developer ID Application key and Notarization credentials as
+  repository secrets and fill the matching fields in
+  `[package.metadata.packager]` (cargo-packager documents the secret names). Until then
+  the DMG is unsigned.
+- **Windows:** provide a code-signing certificate and its password as secrets and enable
+  the NSIS signing step in the packager profile. Until then the NSIS installer is unsigned.
+- **Linux:** `.deb` does not require code signing for installation, but you may want to
+  upload to a PPA or package repository if you want `apt` fetches to verify the package.
+
+### CI workflow
+
+The release workflow in `.github/workflows/release.yml` runs on any tag matching `v*` and
+on `workflow_dispatch`. For each platform/target/format in the matrix it:
+
+1. checks out the repo,
+2. installs the Rust toolchain for that target,
+3. installs platform prerequisites (FFmpeg + windowing libs),
+4. builds `clipfarm-cli` and `clipfarm-app` in release mode for the target,
+5. runs `cargo packager` for the chosen format into `dist/`,
+6. uploads `dist/` as a workflow artifact named `clipfarm-<format>-<target>`.
+
+When the trigger is a tag, the `attach` job downloads all installer artifacts, flattens
+them into a single directory, and attaches every file to the GitHub Release. Artifacts are
+also downloadable from the Actions run for any run, including `workflow_dispatch` builds
+from `main`.
+
 
 ### Verification status
 

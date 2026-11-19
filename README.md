@@ -122,16 +122,17 @@ is keyboard-operable (`⌘/Ctrl+1…4`, `⌘/Ctrl+E`, `⌘/Ctrl+N`, `Esc`).
 
 ### 1. Native packages
 
-The release workflow builds platform installers from the same source:
+The release workflow builds platform installers from the same source and attaches them to
+GitHub Releases:
 
-| Platform | Formats |
-| --- | --- |
-| macOS | `.dmg` (Apple silicon and Intel; FFmpeg recommended via Homebrew) |
-| Windows | `.msi` / NSIS `.exe` |
-| Linux | `.deb` and `.AppImage` |
+| Platform | Format | Notes |
+| --- | --- | --- |
+| macOS | `.dmg` | Apple silicon and Intel; FFmpeg recommended via Homebrew |
+| Windows | NSIS `.exe` | Per-user installer with Start menu/Desktop shortcuts and an uninstaller |
+| Linux | `.deb` | System package with a desktop entry |
 
-Grab them from **Releases** once the repository has been published and the workflow
-has run. Local packaging is documented in [docs/PLATFORM.md](docs/PLATFORM.md).
+Grab them from **Releases** once the repository has been published and a `v*` tag has been
+pushed. Local packaging is documented in [docs/PLATFORM.md](docs/PLATFORM.md).
 
 ### 2. Terminal / package manager
 

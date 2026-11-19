@@ -26,3 +26,19 @@ publisher = "clipfarm"
 description = "Long video in. Shorts out. A local-first Rust clipping studio."
 icons = ["../../build/icon.png"]
 out-dir = "../../dist"
+
+[target.'cfg(windows)'.package.metadata.packager]
+short-version = "${CARGO_PACKAGER_VERSION}"
+windows-install-mode = "currentUser"
+application-verifier = false
+
+[target.'cfg(macos)'.package.metadata.packager]
+short-version = "${CARGO_PACKAGER_VERSION}"
+
+[target.'cfg(linux)'.package.metadata.packager]
+short-version = "${CARGO_PACKAGER_VERSION}"
+
+[[package.metadata.packager.signing]]
+# Temporarily disable signing until macOS/Windows code-signing secrets are provided.
+# See docs/PLATFORM.md for the recommended signing setup.
+kind = "no-signing"
