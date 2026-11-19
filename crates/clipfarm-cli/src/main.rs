@@ -229,11 +229,10 @@ fn run() -> Result<()> {
             project,
             clip,
             raw,
-            rendered,
+            rendered: _,
             quality,
             out,
         } => {
-            let _ = rendered;
             let tools = Tools::discover(&config)?;
             let mut project = project::load_project(&project)?;
             let index = pipeline::find_clip_index(&project, &clip)?;
@@ -311,7 +310,7 @@ fn analyze_project(
     println!("\n  project   {} ({})", project.name, short_id(project.id));
     let options = AnalyzeOptions {
         target_clips: clips.clamp(1, 40),
-        max_seconds: max_seconds.min(MAX_CLIP_SECONDS).max(4.0),
+        max_seconds: max_seconds.clamp(4.0, MAX_CLIP_SECONDS),
         min_seconds: 10.0,
     };
     let report = pipeline::analyze(tools, project, &options, &mut |fraction, message| {
@@ -368,7 +367,9 @@ fn doctor(config: &AppConfig) -> Result<()> {
             if tools.supports_subtitles() {
                 println!("\n  ● libass present — captions can be burned in.");
             } else {
-                println!("\n  ○ This FFmpeg has no libass; rendered clips ship with an SRT sidecar instead.");
+                println!(
+                    "\n  ○ This FFmpeg has no libass; rendered clips ship with an SRT sidecar instead."
+                );
             }
         }
         Err(error) => {
@@ -391,11 +392,13 @@ fn doctor(config: &AppConfig) -> Result<()> {
 fn list_projects() -> Result<()> {
     let projects = project::list_projects()?;
     if projects.is_empty() {
-        println!("\n  No harvests yet. Try:\n\n    clipfarm ingest ~/Videos/interview.mp4 --niche podcast\n");
+        println!(
+            "\n  No harvests yet. Try:\n\n    clipfarm ingest ~/Videos/interview.mp4 --niche podcast\n"
+        );
         return Ok(());
     }
     println!(
-        "\n  {:<10} {:<28} {:>6} {:>8}  {}",
+        "\n  {:<10} {:<28} {:>6} {:>8} {:<8}",
         "ID", "NAME", "CLIPS", "LENGTH", "UPDATED"
     );
     for summary in projects {
@@ -430,7 +433,7 @@ fn print_clips(project: &Project) {
         return;
     }
     println!(
-        "\n  {:<4} {:<44} {:>6} {:>6} {}",
+        "\n  {:<4} {:<44} {:>6} {:>6} {:<8}",
         "#", "TITLE", "LENGTH", "SCORE", "HOOK"
     );
     for (index, clip) in project.clips.iter().enumerate() {

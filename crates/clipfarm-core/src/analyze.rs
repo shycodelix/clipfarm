@@ -370,7 +370,7 @@ mod tests {
     use chrono::Utc;
 
     fn project(duration: f64) -> Project {
-        let mut project = Project {
+        Project {
             schema_version: 1,
             id: Uuid::new_v4(),
             name: "test".into(),
@@ -390,9 +390,7 @@ mod tests {
             transcript: Transcript::default(),
             clips: Vec::new(),
             settings: Default::default(),
-        };
-        project.settings.target_clips = 3;
-        project
+        }
     }
 
     fn segments(lengths: &[(f64, f64)]) -> Vec<SpeechSegment> {
@@ -417,8 +415,10 @@ mod tests {
             (80.0, 99.0),
             (100.0, 119.0),
         ]);
-        let mut options = AnalyzeOptions::default();
-        options.max_seconds = 90.0; // request more than allowed on purpose
+        let options = AnalyzeOptions {
+            max_seconds: 90.0, // request more than allowed on purpose
+            ..AnalyzeOptions::default()
+        };
         let outcome = plan_clips(&project, &speech, &options, &mut |_, _| {});
         assert!(!outcome.clips.is_empty());
         for clip in &outcome.clips {
@@ -438,8 +438,10 @@ mod tests {
     fn a_five_minute_monologue_is_split_into_short_clips() {
         let project = project(180.0);
         let speech = segments(&[(0.0, 180.0)]);
-        let mut options = AnalyzeOptions::default();
-        options.target_clips = 20;
+        let options = AnalyzeOptions {
+            target_clips: 20,
+            ..AnalyzeOptions::default()
+        };
         let outcome = plan_clips(&project, &speech, &options, &mut |_, _| {});
         assert!(
             outcome.clips.len() >= 3,

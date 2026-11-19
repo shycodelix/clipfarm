@@ -91,11 +91,15 @@ pub fn detect(tools: &Tools, input: &Path, options: &VadOptions) -> Result<Vec<S
         pending.extend_from_slice(&buffer[..read]);
         while pending.len() >= frame_samples * 4 {
             let frame_bytes: Vec<u8> = pending.drain(..frame_samples * 4).collect();
-            let mut sum_sq = 0f64;
-            for chunk in frame_bytes.chunks_exact(4) {
-                let sample = f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
-                sum_sq += (sample as f64) * (sample as f64);
-            }
+            let sum_sq = {
+                let (words, _rest) = frame_bytes.as_chunks::<4>();
+                let mut sum_sq = 0f64;
+                for chunk in words {
+                    let sample = f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
+                    sum_sq += (sample as f64) * (sample as f64);
+                }
+                sum_sq
+            };
             let rms = (sum_sq / frame_samples as f64).sqrt();
             let db = 20.0 * (rms.max(1e-7)).log10();
             let time = frame_index as f64 * frame_seconds;

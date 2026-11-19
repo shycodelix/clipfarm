@@ -171,17 +171,21 @@ pub fn focus_center(tools: &Tools, input: &Path, at: f64) -> Result<f64> {
     }
     let pixels = &output.stdout[..WIDTH * HEIGHT];
     let mut column_energy = vec![0f64; WIDTH];
-    for y in 1..HEIGHT {
-        for x in 1..WIDTH {
-            let idx = y * WIDTH + x;
-            let dx = (pixels[idx] as f64 - pixels[idx - 1] as f64).abs();
-            let dy = (pixels[idx] as f64 - pixels[idx - WIDTH] as f64).abs();
-            column_energy[x] += dx + dy;
+    let mut prev_row: &[u8] = &[];
+    let (rows, _rem) = pixels.as_chunks::<WIDTH>();
+    for row in rows {
+        if !prev_row.is_empty() {
+            for x in 1..WIDTH {
+                let dx = (row[x] as f64 - row[x - 1] as f64).abs();
+                let dy = (row[x] as f64 - prev_row[x] as f64).abs();
+                column_energy[x] += dx + dy;
+            }
         }
+        prev_row = row;
     }
     // Window width for a 9:16 crop of 16:9 source: about 31 of 96 columns.
     let window = ((WIDTH as f64) * 9.0 / 16.0).round() as usize;
-    let window = window.min(WIDTH).max(1);
+    let window = window.clamp(1, WIDTH);
     let mut best_x = 0usize;
     let mut best = f64::MIN;
     let mut running: f64 = column_energy.iter().take(window).sum();

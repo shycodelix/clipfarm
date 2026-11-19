@@ -849,11 +849,7 @@ impl ClipfarmApp {
                 );
                 theme::chip(
                     ui,
-                    if llm_available {
-                        p.card_alt
-                    } else {
-                        p.card_alt
-                    },
+                    p.card_alt,
                     if llm_available { p.mint } else { p.faint },
                     if llm_available {
                         "ollama · loopback"

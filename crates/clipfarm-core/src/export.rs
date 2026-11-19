@@ -254,20 +254,18 @@ fn export_rendered(
 
     let mut subtitle_file: Option<PathBuf> = None;
     let mut burned_captions = false;
-    if clip.settings.captions_enabled && !clip.captions.is_empty() {
-        if tools.supports_subtitles() {
-            let directory = std::env::temp_dir().join(format!("clipfarm-{}", clip.id));
-            std::fs::create_dir_all(&directory)?;
-            let srt = directory.join("captions.srt");
-            std::fs::write(&srt, captions::to_srt(&clip.captions, clip.start))?;
-            filters.push(format!(
-                "subtitles=filename='{}':force_style='{}'",
-                escape_filter_path(&srt),
-                clip.settings.caption_style.force_style()
-            ));
-            subtitle_file = Some(directory);
-            burned_captions = true;
-        }
+    if clip.settings.captions_enabled && !clip.captions.is_empty() && tools.supports_subtitles() {
+        let directory = std::env::temp_dir().join(format!("clipfarm-{}", clip.id));
+        std::fs::create_dir_all(&directory)?;
+        let srt = directory.join("captions.srt");
+        std::fs::write(&srt, captions::to_srt(&clip.captions, clip.start))?;
+        filters.push(format!(
+            "subtitles=filename='{}':force_style='{}'",
+            escape_filter_path(&srt),
+            clip.settings.caption_style.force_style()
+        ));
+        subtitle_file = Some(directory);
+        burned_captions = true;
     }
 
     let filter = filters.join(",");
