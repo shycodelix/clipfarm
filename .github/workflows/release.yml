@@ -94,6 +94,9 @@ jobs:
           cp "$STAGING/control/md5sums" rebuilt/DEBIAN/
           cp -r "$STAGING/data" rebuilt/
           dpkg-deb --build rebuilt dist/clipfarm-${{ matrix.target }}.deb
+          # Remove the raw cargo-packager .deb so only the dpkg-deb-rebuilt
+          # package is uploaded (avoids shipping two .debs with similar names).
+          rm -f dist/clipfarm-app_*.deb
 
       - name: Upload installers
         uses: actions/upload-artifact@v4
