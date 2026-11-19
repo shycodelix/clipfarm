@@ -89,7 +89,7 @@ jobs:
             --target ${{ matrix.target }} \
             -p clipfarm-app \
             -f ${{ matrix.formats }} \
-            --output-dir dist \
+            --out-dir dist \
             --bundle-options binaries-dir=target/${{ matrix.target }}/release
 
       - name: Upload installers
