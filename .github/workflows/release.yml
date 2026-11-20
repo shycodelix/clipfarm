@@ -135,7 +135,8 @@ jobs:
           # Verify against the yt-dlp release SHA2-256SUMS file.
           curl -fsSL --max-time 60 -o /tmp/SHA2-256SUMS \
             "https://github.com/yt-dlp/yt-dlp/releases/download/${YT_DLP_VERSION}/SHA2-256SUMS"
-          EXPECTED=$(grep -i "sha256:.*${YT_DLP_BINARY}" /tmp/SHA2-256SUMS | sed 's/.*sha256://' | tr -d ' ')
+          # SHA2-256SUMS uses standard sha256sum format (<hash>  <filename>).
+          EXPECTED=$(grep -F "$YT_DLP_BINARY" /tmp/SHA2-256SUMS | awk '{print $1}')
           ACTUAL=$(sha256sum "/tmp/${YT_DLP_BINARY}" | awk '{print $1}')
           if [[ -z "$EXPECTED" || "$EXPECTED" != "$ACTUAL" ]]; then
             echo "ERROR: yt-dlp checksum mismatch (expected $EXPECTED, got $ACTUAL)"; exit 1
@@ -189,7 +190,7 @@ jobs:
           # Confirm libass is present.
           $FiltersOut = & (Join-Path $BinariesDir "ffmpeg-${Target}.exe") -filters *>&1 | Out-String
           if ($FiltersOut -notmatch "libass") { throw "bundled FFmpeg does not include libass" }
-          Write-Host "FFmpeg: $($VersionOut -split "`n" | Select-Object -First 1)"
+          Write-Host "FFmpeg: $($FiltersOut -split "`n" | Select-Object -First 1)"
 
           # ---- yt-dlp ----
           $YtDlpBinary = "yt-dlp.exe"
@@ -198,8 +199,10 @@ jobs:
           Invoke-WebRequest -Uri $YtDlpUrl -OutFile "$env:TEMP/$YtDlpBinary" -TimeoutSec 600
           # yt-dlp publishes SHA2-256SUMS with per-file sha256 lines.
           Invoke-WebRequest -Uri "https://github.com/yt-dlp/yt-dlp/releases/download/${env:YT_DLP_VERSION}/SHA2-256SUMS" -OutFile "$env:TEMP/yt-dlp-sums" -TimeoutSec 60
-          $YtExpected = (Select-String -Path "$env:TEMP/yt-dlp-sums" -Pattern $YtDlpBinary | ForEach-Object { $_.Line } | Select-String -Pattern "sha256:").Line
-          $YtExpectedHash = ($YtExpected -split "sha256:")[1].Split(" ")[0].ToLower()
+          # SHA2-256SUMS uses standard sha256sum format (<hash>  <filename>).
+          $YtExpected = (Select-String -Path "$env:TEMP/yt-dlp-sums" -Pattern $YtDlpBinary).Line
+          if (-not $YtExpected) { throw "checksum entry not found for $YtDlpBinary in SHA2-256SUMS" }
+          $YtExpectedHash = $YtExpected.Split(" ")[0].ToLower()
           $YtActualHash = (Get-FileHash "$env:TEMP/$YtDlpBinary" -Algorithm SHA256).Hash.ToLower()
           if ($YtExpectedHash -ne $YtActualHash) { throw "yt-dlp checksum mismatch" }
 
