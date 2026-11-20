@@ -88,7 +88,7 @@ Both rooms in both palettes, rendered from the real app (headless Linux, 1440×9
 
 | Tool | Needed? | Notes |
 | --- | --- | --- |
-| **FFmpeg + ffprobe** | required | Bundled in the Linux + Windows installers (GPL static build with libass for captions). On macOS, `brew install ffmpeg` until a bundled macOS build is available. |
+| **FFmpeg + ffprobe** | required | Bundled in the Linux + Windows installers (pinned GPL static build with libass for captions). On macOS, `brew install ffmpeg` until a bundled macOS build is available. |
 | **yt-dlp** | for URLs | Bundled in the Linux + Windows installers. On macOS, `brew install yt-dlp` until bundled.
 | **whisper.cpp** | optional | Word-level captions. Without it clipfarm runs VAD-only. Needs a `ggml-*.bin` model. |
 | **Ollama** (or any loopback OpenAI-ish JSON endpoint) | optional | Local title/refine assistance. Off by default. |

@@ -14,9 +14,12 @@ before falling back to PATH or an explicit config path. The app still diagnoses 
 misconfigured tools in **Tuning** and `clipfarm doctor`.
 
 **What is bundled:**
-- Linux + Windows: FFmpeg (GPL static build from BtbN/FFmpeg-Builds, libass included for
-  burned-in captions), ffprobe, and the yt-dlp standalone executable. Each binary is fetched
-  and SHA-256-verified against the upstream release checksums in CI before packaging.
+- Linux + Windows: FFmpeg (GPL static build from a **pinned** BtbN/FFmpeg-Builds auto-build
+  release, libass included for burned-in captions), ffprobe, and the yt-dlp standalone
+  executable. Each binary is fetched and SHA-256-verified against the upstream release
+  checksums in CI before packaging. The FFmpeg release is pinned (`FFMPEG_RELEASE` in
+  `.github/workflows/release.yml`) so installer contents are reproducible; bump that variable
+  to pull in a newer build.
 - macOS: FFmpeg is **not yet bundled**. BtbN/FFmpeg-Builds does not ship macOS builds, so
   macOS keeps the Homebrew fallback until a macOS static source is pinned and a macOS runner
   is available. The runtime resolver already prefers a bundled copy when present, so the

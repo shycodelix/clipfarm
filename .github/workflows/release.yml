@@ -23,7 +23,9 @@ jobs:
   #
   # Bundling plan:
   #   - Linux + Windows: FFmpeg (BtbN/FFmpeg-Builds, GPL static, libass included)
-  #     + ffprobe + yt-dlp standalone, fetched and SHA-256 verified per target.
+  #     from a pinned auto-build release + ffprobe + yt-dlp standalone, fetched and
+  #     SHA-256 verified per target. Pinning the FFmpeg release makes installer
+  #     contents reproducible; bump FFMPEG_RELEASE when you want a newer build.
   #   - macOS: BtbN does not ship macOS builds, so the macOS legs keep the existing
   #     Homebrew fallback for now. The runtime resolver (config.rs) already prefers
   #     a bundled copy when present, so the macOS path is ready once a macOS static
@@ -63,33 +65,35 @@ jobs:
         env:
           TARGET: ${{ matrix.target }}
           FFMPEG_SOURCE: BtbN/FFmpeg-Builds
-          FFMPEG_VARIANT: gpl            # static GPL build (libx264, libx265, libass)
-          YT_DLP_VERSION: 2026.10.26     # pinned yt-dlp standalone release
+          FFMPEG_RELEASE: autobuild-2026-11-19-12-39   # pinned auto-build (master snapshot, GPL)
+          FFMPEG_VARIANT: gpl                             # static GPL build (libx264, libx265, libass)
+          YT_DLP_VERSION: 2026.10.26                      # pinned yt-dlp standalone release
         run: |
           set -euo pipefail
           BINARIES_DIR="../../target/${TARGET}/release"
           mkdir -p "$BINARIES_DIR"
 
           # ---- FFmpeg / ffprobe ----
-          # Determine the BtbN asset name for this target.
+          # Determine the BtbN asset name for this target. The pinned release
+          # uses snapshot-style names (ffmpeg-N-<count>-g<hash>-<arch>-<variant>.tar.xz).
           if [[ "$TARGET" == x86_64-unknown-linux-gnu ]]; then
-            FFMPEG_ARCHIVE="ffmpeg-master-latest-linux64-gpl.tar.xz"
-            FFMPEG_URL="https://github.com/${FFMPEG_SOURCE}/releases/download/latest/${FFMPEG_ARCHIVE}"
+            FFMPEG_ARCHIVE="ffmpeg-N-129130-gcd39c36377-linux64-gpl.tar.xz"
           elif [[ "$TARGET" == aarch64-unknown-linux-gnu ]]; then
-            FFMPEG_ARCHIVE="ffmpeg-master-latest-linuxarm64-gpl.tar.xz"
-            FFMPEG_URL="https://github.com/${FFMPEG_SOURCE}/releases/download/latest/${FFMPEG_ARCHIVE}"
+            FFMPEG_ARCHIVE="ffmpeg-N-129130-gcd39c36377-linuxarm64-gpl.tar.xz"
           else
             echo "ERROR: unsupported Linux target $TARGET"; exit 1
           fi
+          FFMPEG_URL="https://github.com/${FFMPEG_SOURCE}/releases/download/${FFMPEG_RELEASE}/${FFMPEG_ARCHIVE}"
 
           echo "Fetching FFmpeg archive: $FFMPEG_ARCHIVE"
           curl -fsSL --max-time 1800 -o "/tmp/${FFMPEG_ARCHIVE}" "$FFMPEG_URL"
 
-          # Verify against the upstream checksums.sha256 for the same release.
+          # Verify against the upstream checksums.sha256 for the pinned release.
+          # (checksums.sha256 lives in the same pinned release tarball list.)
           curl -fsSL --max-time 60 -o /tmp/checksums.sha256 \
-            "https://github.com/${FFMPEG_SOURCE}/releases/download/latest/checksums.sha256"
+            "https://github.com/${FFMPEG_SOURCE}/releases/download/${FFMPEG_RELEASE}/checksums.sha256"
           (cd /tmp && sha256sum -c checksums.sha256 --status) || {
-            echo "ERROR: FFmpeg archive checksum mismatch"; exit 1;
+            echo "ERROR: FFmpeg archive checksum mismatch (pinned release ${FFMPEG_RELEASE})"; exit 1;
           }
 
           # Extract and place into the binaries dir with the triple-suffixed name
@@ -139,9 +143,10 @@ jobs:
         if: runner.os == 'Windows'
         env:
           TARGET: ${{ matrix.target }}
-          FFmpeg_SOURCE: BtbN/FFmpeg-Builds
-          FFMPEG_VARIANT: gpl
-          YT_DLP_VERSION: 2026.10.26
+          FFMPEG_SOURCE: BtbN/FFmpeg-Builds
+          FFMPEG_RELEASE: autobuild-2026-11-19-12-39   # pinned auto-build (master snapshot, GPL)
+          FFMPEG_VARIANT: gpl                             # static GPL build (libx264, libx265, libass)
+          YT_DLP_VERSION: 2026.10.26                      # pinned yt-dlp standalone release
         run: |
           $ErrorActionPreference = "Stop"
           $Target = "$env:TARGET"
@@ -150,16 +155,16 @@ jobs:
 
           # ---- FFmpeg / ffprobe ----
           if ($Target -eq "x86_64-pc-windows-msvc") {
-            $Archive = "ffmpeg-master-latest-win64-gpl.zip"
+            $Archive = "ffmpeg-N-129130-gcd39c36377-win64-gpl.zip"
           } else {
             throw "unsupported Windows target $Target"
           }
-          $Url = "https://github.com/$env:FFmpeg_SOURCE/releases/download/latest/$Archive"
+          $Url = "https://github.com/$env:FFmpeg_SOURCE/releases/download/$env:FFMPEG_RELEASE/$Archive"
           Write-Host "Fetching FFmpeg archive: $Archive"
           Invoke-WebRequest -Uri $Url -OutFile "$env:TEMP/$Archive" -TimeoutSec 1800
 
-          # Verify against upstream checksums.sha256.
-          Invoke-WebRequest -Uri "https://github.com/$env:FFmpeg_SOURCE/releases/download/latest/checksums.sha256" -OutFile "$env:TEMP/checksums.sha256" -TimeoutSec 60
+          # Verify against upstream checksums.sha256 for the pinned release.
+          Invoke-WebRequest -Uri "https://github.com/$env:FFmpeg_SOURCE/releases/download/$env:FFMPEG_RELEASE/checksums.sha256" -OutFile "$env:TEMP/checksums.sha256" -TimeoutSec 60
           # checksums.sha256 lines: sha256:<hash>  <filename>
           $Expected = (Select-String -Path "$env:TEMP/checksums.sha256" -Pattern $Archive | ForEach-Object { $_.Line } | Select-String -Pattern "sha256:").Line
           $ExpectedHash = ($Expected -split "sha256:")[1].Split(" ")[0]
