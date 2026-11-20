@@ -20,6 +20,13 @@ misconfigured tools in **Tuning** and `clipfarm doctor`.
   checksums in CI before packaging. The FFmpeg release is pinned (`FFMPEG_RELEASE` in
   `.github/workflows/release.yml`) so installer contents are reproducible; bump that variable
   to pull in a newer build.
+  - Pinned release: `autobuild-2026-11-19-12-39` (newest BtbN auto-build that has a stable
+    `autobuild-*` named tag).
+  - A newer FFmpeg build exists behind BtbN's floating `latest` tag, but `latest` moves over
+    time and its assets use different names, so we do **not** pin to it on purpose. If you want
+    to accept that drift, set `FFMPEG_RELEASE=latest` and switch the asset names to the
+    `ffmpeg-master-latest-*` form; otherwise leave the pin on the newest named auto-build and
+    bump `FFMPEG_RELEASE` when BtbN publishes a newer `autobuild-*` tag.
 - macOS: FFmpeg is **not yet bundled**. BtbN/FFmpeg-Builds does not ship macOS builds, so
   macOS keeps the Homebrew fallback until a macOS static source is pinned and a macOS runner
   is available. The runtime resolver already prefers a bundled copy when present, so the
