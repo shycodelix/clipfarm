@@ -136,7 +136,7 @@ jobs:
           curl -fsSL --max-time 60 -o /tmp/SHA2-256SUMS \
             "https://github.com/yt-dlp/yt-dlp/releases/download/${YT_DLP_VERSION}/SHA2-256SUMS"
           # SHA2-256SUMS uses standard sha256sum format (<hash>  <filename>).
-          EXPECTED=$(grep -F "$YT_DLP_BINARY" /tmp/SHA2-256SUMS | awk '{print $1}')
+          EXPECTED=$(awk -v bin="$YT_DLP_BINARY" '$2 == bin {print $1; exit}' /tmp/SHA2-256SUMS)
           ACTUAL=$(sha256sum "/tmp/${YT_DLP_BINARY}" | awk '{print $1}')
           if [[ -z "$EXPECTED" || "$EXPECTED" != "$ACTUAL" ]]; then
             echo "ERROR: yt-dlp checksum mismatch (expected $EXPECTED, got $ACTUAL)"; exit 1
