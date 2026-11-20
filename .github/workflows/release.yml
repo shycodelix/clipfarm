@@ -187,8 +187,8 @@ jobs:
           Copy-Item (Join-Path $FfmpegRoot "bin\ffprobe.exe") (Join-Path $BinariesDir "ffprobe-${Target}.exe")
 
           # Confirm libass is present.
-          $VersionOut = & (Join-Path $BinariesDir "ffmpeg-${Target}.exe") -version 2>&1
-          if ($VersionOut -notmatch "libass") { throw "bundled FFmpeg does not include libass" }
+          $FiltersOut = & (Join-Path $BinariesDir "ffmpeg-${Target}.exe") -filters *>&1 | Out-String
+          if ($FiltersOut -notmatch "libass") { throw "bundled FFmpeg does not include libass" }
           Write-Host "FFmpeg: $($VersionOut -split "`n" | Select-Object -First 1)"
 
           # ---- yt-dlp ----
