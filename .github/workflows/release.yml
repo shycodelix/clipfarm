@@ -107,8 +107,8 @@ jobs:
           TMPDIR=$(mktemp -d)
           tar -xf "/tmp/${FFMPEG_ARCHIVE}" -C "$TMPDIR"
           FFMPEG_ROOT=$(find "$TMPDIR" -maxdepth 1 -type d | tail -n 1)
-          cp "$FFMPEG_ROOT/ffmpeg"   "$BINARIES_DIR/ffmpeg-${TARGET}"
-          cp "$FFMPEG_ROOT/ffprobe" "$BINARIES_DIR/ffprobe-${TARGET}"
+          cp "$FFMPEG_ROOT/bin/ffmpeg"   "$BINARIES_DIR/ffmpeg-${TARGET}"
+          cp "$FFMPEG_ROOT/bin/ffprobe" "$BINARIES_DIR/ffprobe-${TARGET}"
           chmod +x "$BINARIES_DIR/ffmpeg-${TARGET}" "$BINARIES_DIR/ffprobe-${TARGET}"
 
           # Confirm the build actually includes libass (needed for burned-in
@@ -183,8 +183,8 @@ jobs:
           if (Test-Path $TmpDir) { Remove-Item $TmpDir -Recurse -Force }
           Expand-Archive -Path "$env:TEMP/$Archive" -DestinationPath $TmpDir -Force
           $FfmpegRoot = (Get-ChildItem $TmpDir -Directory | Select-Object -Last 1).FullName
-          Copy-Item (Join-Path $FfmpegRoot "ffmpeg.exe")   (Join-Path $BinariesDir "ffmpeg-${Target}.exe")
-          Copy-Item (Join-Path $FfmpegRoot "ffprobe.exe") (Join-Path $BinariesDir "ffprobe-${Target}.exe")
+          Copy-Item (Join-Path $FfmpegRoot "bin\ffmpeg.exe")   (Join-Path $BinariesDir "ffmpeg-${Target}.exe")
+          Copy-Item (Join-Path $FfmpegRoot "bin\ffprobe.exe") (Join-Path $BinariesDir "ffprobe-${Target}.exe")
 
           # Confirm libass is present.
           $VersionOut = & (Join-Path $BinariesDir "ffmpeg-${Target}.exe") -version 2>$null
