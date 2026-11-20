@@ -89,12 +89,18 @@ jobs:
           curl -fsSL --max-time 1800 -o "/tmp/${FFMPEG_ARCHIVE}" "$FFMPEG_URL"
 
           # Verify against the upstream checksums.sha256 for the pinned release.
-          # (checksums.sha256 lives in the same pinned release tarball list.)
+          # BtbN's checksums.sha256 uses standard sha256sum format
+          # (<hash>  <filename>); verify only the archive we actually downloaded.
           curl -fsSL --max-time 60 -o /tmp/checksums.sha256 \
             "https://github.com/${FFMPEG_SOURCE}/releases/download/${FFMPEG_RELEASE}/checksums.sha256"
-          (cd /tmp && sha256sum -c checksums.sha256 --status) || {
-            echo "ERROR: FFmpeg archive checksum mismatch (pinned release ${FFMPEG_RELEASE})"; exit 1;
-          }
+          EXPECTED=$(grep -F "$FFMPEG_ARCHIVE" /tmp/checksums.sha256 | awk '{print $1}')
+          if [[ -z "$EXPECTED" ]]; then
+            echo "ERROR: checksum entry not found for $FFMPEG_ARCHIVE in checksums.sha256"; exit 1
+          fi
+          ACTUAL=$(sha256sum "/tmp/$FFMPEG_ARCHIVE" | awk '{print $1}')
+          if [[ "$EXPECTED" != "$ACTUAL" ]]; then
+            echo "ERROR: FFmpeg archive checksum mismatch (expected $EXPECTED, got $ACTUAL)"; exit 1
+          fi
 
           # Extract and place into the binaries dir with the triple-suffixed name
           # that cargo-packager expects for externalBinaries.
@@ -164,10 +170,12 @@ jobs:
           Invoke-WebRequest -Uri $Url -OutFile "$env:TEMP/$Archive" -TimeoutSec 1800
 
           # Verify against upstream checksums.sha256 for the pinned release.
+          # BtbN's checksums.sha256 uses standard sha256sum format
+          # (<hash>  <filename>); extract the hash for the archive we downloaded.
           Invoke-WebRequest -Uri "https://github.com/$env:FFmpeg_SOURCE/releases/download/$env:FFMPEG_RELEASE/checksums.sha256" -OutFile "$env:TEMP/checksums.sha256" -TimeoutSec 60
-          # checksums.sha256 lines: sha256:<hash>  <filename>
-          $Expected = (Select-String -Path "$env:TEMP/checksums.sha256" -Pattern $Archive | ForEach-Object { $_.Line } | Select-String -Pattern "sha256:").Line
-          $ExpectedHash = ($Expected -split "sha256:")[1].Split(" ")[0]
+          $Expected = (Select-String -Path "$env:TEMP/checksums.sha256" -Pattern $Archive).Line
+          if (-not $Expected) { throw "checksum entry not found for $Archive in checksums.sha256" }
+          $ExpectedHash = $Expected.Split(" ")[0].ToLower()
           $ActualHash = (Get-FileHash "$env:TEMP/$Archive" -Algorithm SHA256).Hash.ToLower()
           if ($ExpectedHash -ne $ActualHash) { throw "FFmpeg archive checksum mismatch" }
 
