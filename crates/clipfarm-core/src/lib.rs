@@ -30,7 +30,7 @@ pub use model::{
     Source, SourceKind, Transcript, Word, MAX_CLIP_SECONDS,
 };
 pub use project::{data_dir, load_project, new_project, save_project};
-pub use tools::Tools;
+pub use tools::{ToolSource, Tools};
 
 /// Friendly one-line product promise used by the CLI and the UI.
 pub const TAGLINE: &str = "Long video in. Shorts out. No cloud, no credits.";

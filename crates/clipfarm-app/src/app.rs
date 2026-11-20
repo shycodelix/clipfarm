@@ -1561,26 +1561,31 @@ impl ClipfarmApp {
             ui.add_space(6.0);
         }
         for status in &self.statuses {
-            let mark = if status.path.is_some() {
+            let good = status.path.is_some();
+            let mark = if good {
                 p.mint
             } else {
                 p.amber
             };
+            let mut content = if good {
+                status.version.clone().unwrap_or_else(|| {
+                    status.path.clone().unwrap_or_else(|| "found".into())
+                })
+            } else {
+                status.path.clone().unwrap_or_else(|| "missing".into())
+            };
+            if let Some(source) = status.source {
+                content = format!("{}  ({})", content, source);
+            }
             theme::flat_frame(p).show(ui, |ui| {
                 ui.set_width(ui.available_width().min(880.0));
                 ui.horizontal(|ui| {
                     ui.label(RichText::new("●").size(10.0).color(mark));
                     ui.label(RichText::new(status.name).size(12.5).strong().color(p.ink));
-                    ui.label(
-                        RichText::new(status.version.clone().unwrap_or_else(|| {
-                            status.path.clone().unwrap_or_else(|| "missing".into())
-                        }))
-                        .size(11.0)
-                        .color(p.muted),
-                    );
+                    ui.label(RichText::new(content).size(11.0).color(p.muted));
                 });
-                if status.path.is_none() {
-                    ui.label(RichText::new(status.hint).size(10.5).color(p.faint));
+                if !good {
+                    ui.label(RichText::new(&status.hint).size(10.5).color(p.faint));
                 }
             });
         }
@@ -1589,6 +1594,20 @@ impl ClipfarmApp {
         theme::card_frame(p).show(ui, |ui| {
             ui.set_width(ui.available_width().min(880.0));
             theme::kicker(ui, p, "Binary paths (blank = look on PATH)");
+            {
+                let bundled = self.statuses.iter().any(|s| s.name == "FFmpeg" && s.source == Some("bundled"));
+                let yt_bundled = self.statuses.iter().any(|s| s.name == "yt-dlp" && s.source == Some("bundled"));
+                if bundled {
+                    let both = yt_bundled;
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            RichText::new(if both { "Bundled: FFmpeg · ffprobe · yt-dlp" } else { "Bundled: FFmpeg · ffprobe" })
+                                .size(11.0)
+                                .color(p.faint),
+                        );
+                    });
+                }
+            }
             let field = |ui: &mut Ui, label: &str, value: &mut Option<PathBuf>| {
                 ui.horizontal(|ui| {
                     ui.label(RichText::new(label).size(12.0).color(p.muted));

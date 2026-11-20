@@ -15,9 +15,19 @@ permissions:
   packages: write
 
 jobs:
-  # Linux + Windows are required for a release. macOS runners are
-  # intermittently unavailable on shared GitHub runners, so macOS is
-  # built in a separate matrix that does not block the attach job.
+  # Linux + Windows are required for a release. Each installer ships the desktop app,
+  # the `clipfarm` CLI, and the bundled runtime dependencies (FFmpeg, ffprobe and
+  # yt-dlp) as external binaries, verified against upstream checksums before
+  # packaging. macOS runners are intermittently unavailable on shared GitHub runners,
+  # so macOS is built in a separate matrix that does not block the attach job.
+  #
+  # Bundling plan:
+  #   - Linux + Windows: FFmpeg (BtbN/FFmpeg-Builds, GPL static, libass included)
+  #     + ffprobe + yt-dlp standalone, fetched and SHA-256 verified per target.
+  #   - macOS: BtbN does not ship macOS builds, so the macOS legs keep the existing
+  #     Homebrew fallback for now. The runtime resolver (config.rs) already prefers
+  #     a bundled copy when present, so the macOS path is ready once a macOS static
+  #     source is pinned and a macOS runner is available.
   installers:
     name: build (${{ matrix.display }})
     runs-on: ${{ matrix.runner }}
@@ -44,16 +54,159 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
+      # Fetch and verify the bundled runtime dependencies so cargo-packager can
+      # find them as externalBinaries. FFmpeg/ffprobe come from BtbN/FFmpeg-Builds
+      # (Linux + Windows only); yt-dlp comes from the yt-dlp standalone releases.
+      # Both are verified against the upstream release checksums before packaging.
+      - name: Bundle runtime dependencies (Linux)
+        if: runner.os == 'Linux'
+        env:
+          TARGET: ${{ matrix.target }}
+          FFMPEG_SOURCE: BtbN/FFmpeg-Builds
+          FFMPEG_VARIANT: gpl            # static GPL build (libx264, libx265, libass)
+          YT_DLP_VERSION: 2026.10.26     # pinned yt-dlp standalone release
+        run: |
+          set -euo pipefail
+          BINARIES_DIR="../../target/${TARGET}/release"
+          mkdir -p "$BINARIES_DIR"
+
+          # ---- FFmpeg / ffprobe ----
+          # Determine the BtbN asset name for this target.
+          if [[ "$TARGET" == x86_64-unknown-linux-gnu ]]; then
+            FFMPEG_ARCHIVE="ffmpeg-master-latest-linux64-gpl.tar.xz"
+            FFMPEG_URL="https://github.com/${FFMPEG_SOURCE}/releases/download/latest/${FFMPEG_ARCHIVE}"
+          elif [[ "$TARGET" == aarch64-unknown-linux-gnu ]]; then
+            FFMPEG_ARCHIVE="ffmpeg-master-latest-linuxarm64-gpl.tar.xz"
+            FFMPEG_URL="https://github.com/${FFMPEG_SOURCE}/releases/download/latest/${FFMPEG_ARCHIVE}"
+          else
+            echo "ERROR: unsupported Linux target $TARGET"; exit 1
+          fi
+
+          echo "Fetching FFmpeg archive: $FFMPEG_ARCHIVE"
+          curl -fsSL --max-time 1800 -o "/tmp/${FFMPEG_ARCHIVE}" "$FFMPEG_URL"
+
+          # Verify against the upstream checksums.sha256 for the same release.
+          curl -fsSL --max-time 60 -o /tmp/checksums.sha256 \
+            "https://github.com/${FFMPEG_SOURCE}/releases/download/latest/checksums.sha256"
+          (cd /tmp && sha256sum -c checksums.sha256 --status) || {
+            echo "ERROR: FFmpeg archive checksum mismatch"; exit 1;
+          }
+
+          # Extract and place into the binaries dir with the triple-suffixed name
+          # that cargo-packager expects for externalBinaries.
+          TMPDIR=$(mktemp -d)
+          tar -xf "/tmp/${FFMPEG_ARCHIVE}" -C "$TMPDIR"
+          FFMPEG_ROOT=$(find "$TMPDIR" -maxdepth 1 -type d | tail -n 1)
+          cp "$FFMPEG_ROOT/ffmpeg"   "$BINARIES_DIR/ffmpeg-${TARGET}"
+          cp "$FFMPEG_ROOT/ffprobe" "$BINARIES_DIR/ffprobe-${TARGET}"
+          chmod +x "$BINARIES_DIR/ffmpeg-${TARGET}" "$BINARIES_DIR/ffprobe-${TARGET}"
+
+          # Confirm the build actually includes libass (needed for burned-in
+          # captions). If it does not, fail the build rather than ship a caption-
+          # incapable FFmpeg.
+          if ! "$BINARIES_DIR/ffmpeg-${TARGET}" -version 2>/dev/null | grep -qi libass; then
+            echo "ERROR: bundled FFmpeg does not include libass"; exit 1
+          fi
+          echo "FFmpeg: $("$BINARIES_DIR/ffmpeg-${TARGET}" -version 2>/dev/null | head -1)"
+
+          # ---- yt-dlp ----
+          if [[ "$TARGET" == x86_64-unknown-linux-gnu ]]; then
+            YT_DLP_BINARY="yt-dlp_linux"
+          elif [[ "$TARGET" == aarch64-unknown-linux-gnu ]]; then
+            YT_DLP_BINARY="yt-dlp_linux_aarch64"
+          else
+            echo "ERROR: unsupported Linux target $TARGET for yt-dlp"; exit 1
+          fi
+          YT_DLP_URL="https://github.com/yt-dlp/yt-dlp/releases/download/${YT_DLP_VERSION}/${YT_DLP_BINARY}"
+
+          echo "Fetching yt-dlp: $YT_DLP_BINARY"
+          curl -fsSL --max-time 600 -o "/tmp/${YT_DLP_BINARY}" "$YT_DLP_URL"
+
+          # Verify against the yt-dlp release SHA2-256SUMS file.
+          curl -fsSL --max-time 60 -o /tmp/SHA2-256SUMS \
+            "https://github.com/yt-dlp/yt-dlp/releases/download/${YT_DLP_VERSION}/SHA2-256SUMS"
+          EXPECTED=$(grep -i "sha256:.*${YT_DLP_BINARY}" /tmp/SHA2-256SUMS | sed 's/.*sha256://' | tr -d ' ')
+          ACTUAL=$(sha256sum "/tmp/${YT_DLP_BINARY}" | awk '{print $1}')
+          if [[ -z "$EXPECTED" || "$EXPECTED" != "$ACTUAL" ]]; then
+            echo "ERROR: yt-dlp checksum mismatch (expected $EXPECTED, got $ACTUAL)"; exit 1
+          fi
+
+          cp "/tmp/${YT_DLP_BINARY}" "$BINARIES_DIR/yt-dlp-${TARGET}"
+          chmod +x "$BINARIES_DIR/yt-dlp-${TARGET}"
+          echo "yt-dlp: $("$BINARIES_DIR/yt-dlp-${TARGET}" --version 2>/dev/null)"
+
+      - name: Bundle runtime dependencies (Windows)
+        if: runner.os == 'Windows'
+        env:
+          TARGET: ${{ matrix.target }}
+          FFmpeg_SOURCE: BtbN/FFmpeg-Builds
+          FFMPEG_VARIANT: gpl
+          YT_DLP_VERSION: 2026.10.26
+        run: |
+          $ErrorActionPreference = "Stop"
+          $Target = "$env:TARGET"
+          $BinariesDir = "../../target/$Target/release"
+          New-Item -ItemType Directory -Force -Path $BinariesDir | Out-Null
+
+          # ---- FFmpeg / ffprobe ----
+          if ($Target -eq "x86_64-pc-windows-msvc") {
+            $Archive = "ffmpeg-master-latest-win64-gpl.zip"
+          } else {
+            throw "unsupported Windows target $Target"
+          }
+          $Url = "https://github.com/$env:FFmpeg_SOURCE/releases/download/latest/$Archive"
+          Write-Host "Fetching FFmpeg archive: $Archive"
+          Invoke-WebRequest -Uri $Url -OutFile "$env:TEMP/$Archive" -TimeoutSec 1800
+
+          # Verify against upstream checksums.sha256.
+          Invoke-WebRequest -Uri "https://github.com/$env:FFmpeg_SOURCE/releases/download/latest/checksums.sha256" -OutFile "$env:TEMP/checksums.sha256" -TimeoutSec 60
+          # checksums.sha256 lines: sha256:<hash>  <filename>
+          $Expected = (Select-String -Path "$env:TEMP/checksums.sha256" -Pattern $Archive | ForEach-Object { $_.Line } | Select-String -Pattern "sha256:").Line
+          $ExpectedHash = ($Expected -split "sha256:")[1].Split(" ")[0]
+          $ActualHash = (Get-FileHash "$env:TEMP/$Archive" -Algorithm SHA256).Hash.ToLower()
+          if ($ExpectedHash -ne $ActualHash) { throw "FFmpeg archive checksum mismatch" }
+
+          $TmpDir = Join-Path $env:TEMP "ffmpeg-extract"
+          if (Test-Path $TmpDir) { Remove-Item $TmpDir -Recurse -Force }
+          Expand-Archive -Path "$env:TEMP/$Archive" -DestinationPath $TmpDir -Force
+          $FfmpegRoot = (Get-ChildItem $TmpDir -Directory | Select-Object -Last 1).FullName
+          Copy-Item (Join-Path $FfmpegRoot "ffmpeg.exe")   (Join-Path $BinariesDir "ffmpeg-${Target}.exe")
+          Copy-Item (Join-Path $FfmpegRoot "ffprobe.exe") (Join-Path $BinariesDir "ffprobe-${Target}.exe")
+
+          # Confirm libass is present.
+          $VersionOut = & (Join-Path $BinariesDir "ffmpeg-${Target}.exe") -version 2>$null
+          if ($VersionOut -notmatch "libass") { throw "bundled FFmpeg does not include libass" }
+          Write-Host "FFmpeg: $($VersionOut -split "`n" | Select-Object -First 1)"
+
+          # ---- yt-dlp ----
+          $YtDlpBinary = "yt-dlp.exe"
+          $YtDlpUrl = "https://github.com/yt-dlp/yt-dlp/releases/download/${env:YT_DLP_VERSION}/$YtDlpBinary"
+          Write-Host "Fetching yt-dlp: $YtDlpBinary"
+          Invoke-WebRequest -Uri $YtDlpUrl -OutFile "$env:TEMP/$YtDlpBinary" -TimeoutSec 600
+          # yt-dlp publishes SHA2-256SUMS with per-file sha256 lines.
+          Invoke-WebRequest -Uri "https://github.com/yt-dlp/yt-dlp/releases/download/${env:YT_DLP_VERSION}/SHA2-256SUMS" -OutFile "$env:TEMP/yt-dlp-sums" -TimeoutSec 60
+          $YtExpected = (Select-String -Path "$env:TEMP/yt-dlp-sums" -Pattern $YtDlpBinary | ForEach-Object { $_.Line } | Select-String -Pattern "sha256:").Line
+          $YtExpectedHash = ($YtExpected -split "sha256:")[1].Split(" ")[0].ToLower()
+          $YtActualHash = (Get-FileHash "$env:TEMP/$YtDlpBinary" -Algorithm SHA256).Hash.ToLower()
+          if ($YtExpectedHash -ne $YtActualHash) { throw "yt-dlp checksum mismatch" }
+
+          Copy-Item "$env:TEMP/$YtDlpBinary" (Join-Path $BinariesDir "yt-dlp-${Target}.exe")
+          Write-Host "yt-dlp: $(& (Join-Path $BinariesDir "yt-dlp-${Target}.exe") --version 2>$null)"
+
       - name: Prereqs (Linux)
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            ffmpeg libxkbcommon-dev libwayland-dev libx11-dev
+            libxkbcommon-dev libwayland-dev libx11-dev
 
       - name: Prereqs (Windows)
         if: runner.os == 'Windows'
-        run: choco install ffmpeg -y
+        run: |
+          # FFmpeg is now bundled as an external binary; no system FFmpeg is
+          # required to build or package the installer. Keep the choco line as a
+          # no-op safety net for the build step's own developer tooling needs.
+          choco install ffmpeg -y
 
       - name: Version from tag
         id: version
@@ -134,6 +287,9 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
+      # macOS: no bundled FFmpeg yet (BtbN does not ship macOS builds, and shared
+      # GitHub macOS runners are intermittently unavailable). Keep the Homebrew
+      # fallback until a macOS static source is pinned and a runner is available.
       - name: Prereqs (macOS)
         run: brew install ffmpeg
 
@@ -151,6 +307,11 @@ jobs:
       - name: Build release binaries
         run: cargo build --release --target ${{ matrix.target }} -p clipfarm-cli -p clipfarm-app
 
+      # macOS does not yet bundle FFmpeg/ffprobe/yt-dlp as externalBinaries.
+      # Once a macOS static source is chosen (e.g. Evermeet or a build-from-source
+      # leg) and a macOS runner is available, add a "Bundle runtime dependencies
+      # (macOS)" step mirroring the Linux/Windows one, then enable externalBinaries
+      # for the dmg legs.
       - name: Package
         shell: bash
         env:

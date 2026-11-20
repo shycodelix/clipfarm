@@ -22,7 +22,7 @@ long VOD ──► speech/VAD ──► clip planning ──► review ──┬
 
 | Platform | Link |
 | --- | --- |
-| **macOS** (Apple silicon & Intel, `.dmg`) | _Coming soon_ — queued in CI (macOS runners unavailable at the moment) |
+| **macOS** (Apple silicon & Intel, `.dmg`) | _Coming soon_ — queued in CI (macOS runners unavailable at the moment; FFmpeg will be bundled once a macOS static source is pinned) |
 | **Windows** (NSIS installer, `.exe`) | [clipfarm-app_0.2.0_x64-setup.exe](https://github.com/shycodelix/clipfarm/releases/download/v0.2.0/clipfarm-app_0.2.0_x64-setup.exe) |
 | **Linux** (Debian/Ubuntu, `.deb`) | [clipfarm-x86_64-unknown-linux-gnu.deb](https://github.com/shycodelix/clipfarm/releases/download/v0.2.0/clipfarm-x86_64-unknown-linux-gnu.deb) |
 
@@ -30,13 +30,16 @@ Past releases are in [Releases](https://github.com/shycodelix/clipfarm/releases)
 
 ### What the installers include
 
-Each installer ships the **`clipfarm`** CLI as well as the desktop app:
+Each installer ships the **`clipfarm`** CLI as well as the desktop app. Linux and Windows
+also bundle the runtime dependencies so most users do not install anything else by hand:
 
 - **Windows** — CLI added to PATH during install; Start menu and Desktop shortcuts;
-  built-in uninstaller.
+  built-in uninstaller. FFmpeg, ffprobe and yt-dlp ship inside the install.
 - **Linux** — CLI at `/usr/bin/clipfarm` (and `/usr/bin/clipfarm-app`); desktop entry.
+  FFmpeg, ffprobe and yt-dlp ship inside the package and are on PATH after install.
 - **macOS** — CLI lives inside the `.app` bundle at `clipfarm.app/Contents/MacOS/clipfarm`
-  (run it from Terminal, or add a symlink).
+  (run it from Terminal, or add a symlink). FFmpeg is not yet bundled; install it with
+  Homebrew (`brew install ffmpeg`) for now.
 
 ## Screenshots
 
@@ -85,8 +88,8 @@ Both rooms in both palettes, rendered from the real app (headless Linux, 1440×9
 
 | Tool | Needed? | Notes |
 | --- | --- | --- |
-| **FFmpeg + ffprobe** | required | Only hard dependency. 5.0+; 7.x recommended. A build with libass is needed to burn captions. |
-| **yt-dlp** | for URLs | `pipx install yt-dlp`, `brew install yt-dlp`, `winget install yt-dlp` |
+| **FFmpeg + ffprobe** | required | Bundled in the Linux + Windows installers (GPL static build with libass for captions). On macOS, `brew install ffmpeg` until a bundled macOS build is available. |
+| **yt-dlp** | for URLs | Bundled in the Linux + Windows installers. On macOS, `brew install yt-dlp` until bundled.
 | **whisper.cpp** | optional | Word-level captions. Without it clipfarm runs VAD-only. Needs a `ggml-*.bin` model. |
 | **Ollama** (or any loopback OpenAI-ish JSON endpoint) | optional | Local title/refine assistance. Off by default. |
 | **Rust 1.80+** | build only | `rustup` installs it. |

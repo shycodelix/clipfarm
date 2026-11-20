@@ -360,7 +360,7 @@ fn doctor(config: &AppConfig) -> Result<()> {
                     if status.path.is_some() {
                         ""
                     } else {
-                        status.hint
+                        &status.hint
                     }
                 );
             }

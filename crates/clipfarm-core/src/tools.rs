@@ -7,13 +7,38 @@ use serde::Serialize;
 use crate::config::AppConfig;
 use crate::util::{run_with_timeout, which};
 
-/// Discovered external tools. clipfarm never bundles FFmpeg/yt-dlp itself; it
-/// finds them, checks them, and tells you exactly what is missing.
+/// Where an external tool was found. Used by the UI to show whether clipfarm is
+/// using a bundled copy or a user/PATH install.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ToolSource {
+    Bundled,
+    Path,
+    Config,
+}
+
+impl ToolSource {
+    pub fn label(self) -> &'static str {
+        match self {
+            ToolSource::Bundled => "bundled",
+            ToolSource::Path => "PATH",
+            ToolSource::Config => "config",
+        }
+    }
+}
+
+
+/// Discovered external tools. FFmpeg and ffprobe are required; yt-dlp, whisper.cpp
+/// and the local LLM endpoint are optional.
+///
+/// The app prefers its own bundled copy when present (shipped inside the installer
+/// on Linux, Windows and macOS), then an explicit config path, then PATH.
 #[derive(Debug, Clone)]
 pub struct Tools {
     pub ffmpeg: PathBuf,
+    pub ffmpeg_source: ToolSource,
     pub ffprobe: PathBuf,
-    pub yt_dlp: Option<PathBuf>,
+    pub ffprobe_source: ToolSource,
+    pub yt_dlp: Option<(PathBuf, ToolSource)>,
     pub whisper_cli: Option<PathBuf>,
     pub whisper_model: Option<PathBuf>,
     pub llm_endpoint: String,
@@ -27,7 +52,11 @@ pub struct ToolStatus {
     pub path: Option<String>,
     pub version: Option<String>,
     pub required: bool,
-    pub hint: &'static str,
+    pub hint: String,
+    /// Where the tool was found: "bundled", "PATH", "config", or empty when
+    /// unknown. Shown in the Tuning screen next to the tool name.
+    #[serde(skip)]
+    pub source: Option<&'static str>,
 }
 
 impl Tools {
@@ -38,10 +67,24 @@ impl Tools {
         let ffprobe = config.resolve_ffprobe().ok_or_else(|| {
             anyhow!("ffprobe was not found. It ships with FFmpeg; set CLIPFARM_FFPROBE if it is elsewhere.")
         })?;
+
+        let ffmpeg_source = tool_source(&config.ffmpeg, &ffmpeg, true);
+        let ffprobe_source = tool_source(&config.ffprobe, &ffprobe, true);
+
+        let yt_dlp = match config.resolve_ytdlp() {
+            Some(path) => {
+                let src = tool_source(&config.yt_dlp, &path, false);
+                Some((path, src))
+            }
+            None => None,
+        };
+
         Ok(Self {
             ffmpeg,
+            ffmpeg_source,
             ffprobe,
-            yt_dlp: config.resolve_ytdlp(),
+            ffprobe_source,
+            yt_dlp,
             whisper_cli: config.resolve_whisper(),
             whisper_model: config.whisper_model.clone().filter(|path| path.is_file()),
             llm_endpoint: config.llm_endpoint.clone(),
@@ -54,30 +97,42 @@ impl Tools {
     pub fn status(&self) -> Vec<ToolStatus> {
         let ffmpeg_version = version_of(&self.ffmpeg, &["-version"]);
         let ffprobe_version = version_of(&self.ffprobe, &["-version"]);
+        let ffmpeg_tag = tool_tag(&self.ffmpeg_source);
+        let ffprobe_tag = tool_tag(&self.ffprobe_source);
+        let yt_dlp_tag = self
+            .yt_dlp
+            .as_ref()
+            .map(|(_, src)| format!(" ({})", tool_tag(src)));
         vec![
             ToolStatus {
                 name: "FFmpeg",
-                path: Some(self.ffmpeg.display().to_string()),
+                path: Some(tool_display(&self.ffmpeg, ffmpeg_tag)),
                 version: ffmpeg_version,
                 required: true,
-                hint: "brew install ffmpeg · winget install Gyan.FFmpeg · apt install ffmpeg",
+                hint: "Bundled in the installer. If missing, install FFmpeg (brew/winget/apt) or set CLIPFARM_FFMPEG.".to_string(),
+                source: Some(ffmpeg_tag),
             },
             ToolStatus {
                 name: "ffprobe",
-                path: Some(self.ffprobe.display().to_string()),
+                path: Some(tool_display(&self.ffprobe, ffprobe_tag)),
                 version: ffprobe_version,
                 required: true,
-                hint: "Ships with FFmpeg.",
+                hint: "Bundled with FFmpeg. If missing, reinstall FFmpeg from the same source or set CLIPFARM_FFPROBE.".to_string(),
+                source: Some(ffprobe_tag),
             },
             ToolStatus {
                 name: "yt-dlp",
-                path: self.yt_dlp.as_ref().map(|path| path.display().to_string()),
+                path: self.yt_dlp.as_ref().map(|(path, _)| path.display().to_string()),
                 version: self
                     .yt_dlp
                     .as_ref()
-                    .and_then(|path| version_of(path, &["--version"])),
+                    .and_then(|(path, _)| version_of(path, &["--version"])),
                 required: false,
-                hint: "pipx install yt-dlp · brew install yt-dlp",
+                hint: format!(
+                    "Bundled in the installer{}. Update it inside the app, or install from https://github.com/yt-dlp/yt-dlp/releases/latest.",
+                    yt_dlp_tag.as_deref().unwrap_or(""),
+                ),
+                source: self.yt_dlp.as_ref().map(|(_, src)| tool_tag(src)),
             },
             ToolStatus {
                 name: "whisper.cpp",
@@ -90,7 +145,8 @@ impl Tools {
                     .as_ref()
                     .and_then(|path| version_of(path, &["--help"]).map(|_| "found".to_string())),
                 required: false,
-                hint: "Build whisper.cpp and set CLIPFARM_WHISPER + CLIPFARM_WHISPER_MODEL. Without it, clipfarm falls back to VAD-only planning.",
+                hint: "Optional. Build whisper.cpp (or set CLIPFARM_WHISPER) and download a ggml-*.bin model. Without it, clipfarm runs VAD-only.".to_string(),
+                source: None,
             },
             ToolStatus {
                 name: "whisper model",
@@ -100,7 +156,8 @@ impl Tools {
                     .map(|path| path.display().to_string()),
                 version: None,
                 required: false,
-                hint: "Download ggml-base.en.bin or ggml-small.en.bin from the whisper.cpp repo.",
+                hint: "Download ggml-tiny.en.bin or ggml-base.en.bin from the whisper.cpp HuggingFace repo and drop it into the clipfarm data dir, or let the app download it.".to_string(),
+                source: None,
             },
             ToolStatus {
                 name: "local LLM",
@@ -115,7 +172,8 @@ impl Tools {
                     None
                 },
                 required: false,
-                hint: "Optional. `ollama pull llama3.2`, then enable it in Tuning. Clipfarm never calls a paid API.",
+                hint: "Optional. `ollama pull llama3.2`, then enable it in Tuning. Clipfarm only talks to loopback endpoints.".to_string(),
+                source: None,
             },
         ]
     }
@@ -170,6 +228,19 @@ impl Tools {
 
     pub fn whisper_ready(&self) -> bool {
         self.whisper_cli.is_some() && self.whisper_model.is_some()
+    }
+
+    /// Bundled copy of FFmpeg is present and usable. This is the signal the app
+    /// uses to decide whether to show the "bundled" marker in Tuning and whether
+    /// the first-run health check is satisfied for video.
+    pub fn ffmpeg_is_bundled(&self) -> bool {
+        matches!(self.ffmpeg_source, ToolSource::Bundled)
+    }
+
+    /// Bundled copy of yt-dlp is present. When `None`, the app can prompt the
+    /// user to let it download the standalone yt-dlp for their platform.
+    pub fn yt_dlp_is_bundled(&self) -> bool {
+        matches!(self.yt_dlp.as_ref().map(|(_, src)| src), Some(ToolSource::Bundled))
     }
 
     /// Run a quick, quiet command, returning trimmed stdout. Handy for probes.
@@ -270,4 +341,60 @@ pub fn command_in(dir: &Path, program: &Path) -> Command {
 fn _assert_context_is_used() -> Result<()> {
     std::fs::metadata(".").context("metadata")?;
     Ok(())
+}
+
+/// Best-effort check: is `path` inside the app bundle / install root that cargo-
+/// packager uses for externals? Used to tag a tool as "bundled" in the UI.
+fn bundled_path(path: &Path) -> Option<PathBuf> {
+    let exec = std::env::current_exe().ok()?;
+    if let Some(app) = app_bundle_dir(&exec) {
+        let macos_dir = app.join("Contents/MacOS");
+        if path.starts_with(&macos_dir) {
+            return Some(macos_dir);
+        }
+    }
+    if cfg!(windows) {
+        if let Some(parent) = exec.parent() {
+            if path.starts_with(&parent) {
+                return Some(parent.to_path_buf());
+            }
+        }
+    }
+    None
+}
+
+fn app_bundle_dir(exec: &Path) -> Option<PathBuf> {
+    let mut dir = exec.parent()?.to_path_buf();
+    while let Some(parent) = dir.parent() {
+        if parent.file_name()?.to_str() == Some("MacOS") {
+            return Some(dir.parent()?.to_path_buf());
+        }
+        dir = parent.to_path_buf();
+    }
+    None
+}
+
+fn tool_tag(src: &ToolSource) -> &'static str {
+    match src {
+        ToolSource::Bundled => "bundled",
+        ToolSource::Path => "PATH",
+        ToolSource::Config => "config",
+    }
+}
+
+fn tool_display(path: &Path, tag: &str) -> String {
+    if tag.is_empty() {
+        return path.display().to_string();
+    }
+    format!("{} ({})", path.display(), tag)
+}
+
+fn tool_source(configured: &Option<PathBuf>, resolved: &Path, _required: bool) -> ToolSource {
+    if configured.as_ref().map(|p| p == resolved).unwrap_or(false) {
+        ToolSource::Config
+    } else if bundled_path(resolved).is_some() {
+        ToolSource::Bundled
+    } else {
+        ToolSource::Path
+    }
 }

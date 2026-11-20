@@ -41,7 +41,7 @@ binaries = [
 ]
 
 # Desktop integration is useful on Linux; keep it on by default.
-[linux]
+[package.metadata.packager.linux]
 generate-desktop-entry = true
 
 # Windows: per-user install keeps the uninstaller and shortcuts user-scoped.
@@ -60,6 +60,32 @@ short-version = "${CARGO_PACKAGER_VERSION}"
 # Linux: .deb ships the app and the CLI; version from env.
 [target.'cfg(linux)'.package.metadata.packager]
 short-version = "${CARGO_PACKAGER_VERSION}"
+
+# Bundled runtime dependencies. The packager places each external binary into the
+# app package using the platform conventions:
+#
+#   macOS:   <app>.app/Contents/MacOS/<name>-<triple>
+#   Linux:   usr/bin/<name>-<triple>   (.deb; on install the plain Binary is what
+#            ends up on PATH, so the user-visible name is the plain one)
+#   Windows: $INSTDIR/<name>-<triple>.exe   (next to the app .exe)
+#
+# The names below are WITHOUT the target-triple suffix: cargo-packager appends
+# `-<target-triple>` (and `.exe` on Windows) automatically when it looks for the
+# file in the binaries directory.
+#
+# The actual files are fetched and verified in CI (.github/workflows/release.yml)
+# from these sources:
+#   - FFmpeg/ffprobe:  BtbN/FFmpeg-Builds "latest" release, GPL static build,
+#                       verified against that release's checksums.sha256. Linux and
+#                       Windows only; BtbN does not ship macOS builds.
+#   - yt-dlp:          yt-dlp standalone release (yt-dlp.exe / yt-dlp_macos /
+#                       yt-dlp_linux), verified against the release checksums.
+#
+# macOS FFmpeg: BtbN does not ship macOS, so the macOS legs keep the existing
+# Homebrew fallback until a macOS runner is available and a macOS static source is
+# pinned. The runtime resolver (config.rs) already prefers a bundled copy when
+# present, so the macOS path is ready once the binary is supplied.
+externalBinaries = ["ffmpeg", "ffprobe", "yt-dlp"]
 
 # Signing is intentionally left disabled until macOS/Windows code-signing secrets
 # are provided. See docs/PLATFORM.md for the recommended signing setup.

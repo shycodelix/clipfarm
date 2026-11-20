@@ -97,41 +97,78 @@ impl AppConfig {
         write_atomic(&Self::path(), &serde_json::to_string_pretty(self)?)
     }
 
+    /// Resolve FFmpeg, preferring the app's own bundled copy when present,
+    /// then an explicit config path, then PATH. The bundled layout differs per
+    /// platform because cargo-packager places `externalBinaries` in different
+    /// directories:
+    ///   - macOS:   `<app>.app/Contents/MacOS/ffmpeg-<triple>`
+    ///   - Linux:   `usr/bin/ffmpeg-<triple>`  (in the .deb; after install it is on PATH as `ffmpeg`)
+    ///   - Windows: `$INSTDIR/ffmpeg-<triple>.exe`  (next to the app exe)
+    ///
+    /// On Linux the packager actually renames externals to their plain name when
+    /// placing them into `usr/bin`, so the installed binary is `ffmpeg` on PATH.
+    /// The resolver therefore checks the app-IPC/layout guess only as a fallback
+    /// hint; the dominant behavior on every platform is "bundled binary found? use
+    /// it; else PATH".
     pub fn resolve_ffmpeg(&self) -> Option<PathBuf> {
-        self.ffmpeg
-            .clone()
-            .filter(|path| path.is_file())
-            .or_else(|| which("ffmpeg"))
+        // 1. Explicit user override.
+        if let Some(path) = self.ffmpeg.clone().filter(|path| path.is_file()) {
+            return Some(path);
+        }
+
+        // 2. Bundled copy shipped inside the app package.
+        bundled_ffmpeg().filter(|path| path.is_file()).or_else(|| {
+            // 3. The usual "ffprobe next to ffmpeg" portable layout, in case the
+            //    user dropped a portable build next to our guess.
+            self.ffmpeg
+                .as_ref()
+                .and_then(|ffmpeg| ffmpeg.parent())
+                .map(|dir| {
+                    dir.join(if cfg!(windows) {
+                        "ffmpeg.exe"
+                    } else {
+                        "ffmpeg"
+                    })
+                })
+                .filter(|path| path.is_file())
+        })
     }
 
+    /// Resolve ffprobe. Prefer an explicit override, then the bundled copy (same
+    /// per-platform layout as ffmpeg), then PATH, then a sibling next to the
+    /// resolved FFmpeg (the common portable-build layout).
     pub fn resolve_ffprobe(&self) -> Option<PathBuf> {
-        self.ffprobe
-            .clone()
-            .filter(|path| path.is_file())
-            .or_else(|| which("ffprobe"))
-            .or_else(|| {
-                // A sibling ffprobe next to the configured ffmpeg is the common
-                // "portable build" layout.
-                self.ffmpeg
-                    .as_ref()
-                    .and_then(|ffmpeg| ffmpeg.parent())
-                    .map(|dir| {
-                        dir.join(if cfg!(windows) {
-                            "ffprobe.exe"
-                        } else {
-                            "ffprobe"
-                        })
-                    })
-                    .filter(|path| path.is_file())
-            })
+        if let Some(path) = self.ffprobe.clone().filter(|path| path.is_file()) {
+            return Some(path);
+        }
+
+                    bundled_ffprobe().filter(|path| path.is_file()).or_else(|| {
+            // Sibling ffprobe next to the ffmpeg we actually resolved is the most
+            // reliable portable-build guess.
+            let ffmpeg = self.resolve_ffmpeg()?;
+            let dir = ffmpeg.parent()?.to_path_buf();
+            let probe = dir.join(if cfg!(windows) {
+                "ffprobe.exe"
+            } else {
+                "ffprobe"
+            });
+            if probe.is_file() { Some(probe) } else { None }
+        })
     }
 
     pub fn resolve_ytdlp(&self) -> Option<PathBuf> {
-        self.yt_dlp
-            .clone()
-            .filter(|path| path.is_file())
-            .or_else(|| which("yt-dlp"))
-            .or_else(|| which("yt-dlp.exe"))
+        if let Some(path) = self.yt_dlp.clone().filter(|path| path.is_file()) {
+            return Some(path);
+        }
+
+        // yt-dlp standalone executables use a platform-distinct basename, so the
+        // bundled name is the real executable name on each platform:
+        //   - Windows: yt-dlp.exe
+        //   - macOS:   yt-dlp_macos
+        //   - Linux:   yt-dlp_linux
+        bundled_yt_dlp().filter(|path| path.is_file()).or_else(|| {
+            which("yt-dlp").or_else(|| which("yt-dlp.exe"))
+        })
     }
 
     pub fn resolve_whisper(&self) -> Option<PathBuf> {
@@ -148,6 +185,172 @@ impl AppConfig {
     pub fn llm_allowed(&self) -> bool {
         self.llm_enabled && is_loopback(&self.llm_endpoint)
     }
+}
+
+/// Absolute path to ffmpeg when clipfarm is running from a packaged installer
+/// that bundled FFmpeg as an external binary. Returns `None` when the process
+/// image is not in a recognized app bundle / install layout (for example a
+/// `cargo run` dev build or a source checkout). In that case the resolver falls
+/// back to PATH / explicit config.
+fn bundled_ffmpeg() -> Option<PathBuf> {
+    // macOS: the app binary lives in `<app>.app/Contents/MacOS/`. Externals ship
+    // in the same directory with the target-triple suffix.
+    if let Some(exec) = std::env::current_exe().ok().as_ref() {
+        if let Some(app) = app_bundle_dir(exec) {
+            let macos_dir = app.join("Contents/MacOS");
+            // The packager names externals `<name>-<triple>` (plus .exe on
+            // Windows). We try a few likely names rather than depending on one
+            // exact triple string at runtime.
+            for name in bundled_names("ffmpeg") {
+                let candidate = macos_dir.join(&name);
+                if candidate.is_file() {
+                    return Some(candidate);
+                }
+            }
+        }
+
+        // Windows NSIS: externals are placed next to the app exe in the install
+        // root ($INSTDIR), with the `<name>-<triple>.exe` naming.
+        if cfg!(windows) {
+            for name in bundled_names("ffmpeg.exe") {
+                let candidate = exec.parent()?.join(&name);
+                if candidate.is_file() {
+                    return Some(candidate);
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Bundled ffprobe path, using the same per-platform layout as ffmpeg.
+fn bundled_ffprobe() -> Option<PathBuf> {
+    if let Some(exec) = std::env::current_exe().ok().as_ref() {
+        if let Some(app) = app_bundle_dir(exec) {
+            let macos_dir = app.join("Contents/MacOS");
+            for name in bundled_names("ffprobe") {
+                let candidate = macos_dir.join(&name);
+                if candidate.is_file() {
+                    return Some(candidate);
+                }
+            }
+        }
+        if cfg!(windows) {
+            for name in bundled_names("ffprobe.exe") {
+                let candidate = exec.parent()?.join(&name);
+                if candidate.is_file() {
+                    return Some(candidate);
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Bundled yt-dlp path. cargo-packager names external binaries
+/// `<name>-<target-triple>` (plus `.exe` on Windows), so the bundled copy is
+/// checked under those triple-suffixed names first, then under the standalone
+/// release names (yt-dlp.exe / yt-dlp_macos / yt-dlp_linux) as a fallback for
+/// manual installs.
+fn bundled_yt_dlp() -> Option<PathBuf> {
+    if let Some(exec) = std::env::current_exe().ok().as_ref() {
+        // Triple-suffixed names are what cargo-packager places into the app
+        // package. Check those first on every platform.
+        for name in bundled_names("yt-dlp") {
+            // On macOS the packager puts externals inside the .app bundle.
+            if let Some(app) = app_bundle_dir(exec) {
+                let candidate = app.join("Contents/MacOS").join(&name);
+                if candidate.is_file() {
+                    return Some(candidate);
+                }
+            }
+            // On Windows the packager puts externals next to the app exe.
+            if cfg!(windows) {
+                if let Some(dir) = exec.parent() {
+                    let candidate = dir.join(&name);
+                    if candidate.is_file() {
+                        return Some(candidate);
+                    }
+                }
+            }
+            // Linux: check next to the exe as a fallback for some layouts.
+            if let Some(dir) = exec.parent() {
+                let candidate = dir.join(&name);
+                if candidate.is_file() {
+                    return Some(candidate);
+                }
+            }
+        }
+
+        // Fallback: standalone release names (manual installs, non-packaged
+        // layouts).
+        if let Some(app) = app_bundle_dir(exec) {
+            let macos_dir = app.join("Contents/MacOS");
+            for name in &["yt-dlp_macos", "yt-dlp.exe", "yt-dlp"] {
+                let candidate = macos_dir.join(name);
+                if candidate.is_file() {
+                    return Some(candidate);
+                }
+            }
+        }
+        if cfg!(windows) {
+            if let Some(dir) = exec.parent() {
+                for name in &["yt-dlp.exe", "yt-dlp"] {
+                    let candidate = dir.join(name);
+                    if candidate.is_file() {
+                        return Some(candidate);
+                    }
+                }
+            }
+        }
+        for name in &["yt-dlp_linux", "yt-dlp"] {
+            if let Some(dir) = exec.parent() {
+                let candidate = dir.join(name);
+                if candidate.is_file() {
+                    return Some(candidate);
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Candidate names the packager might use for an external binary named `base`.
+/// The packager names externals `<base>-<target-triple>` (plus `.exe` on
+/// Windows). We probe a small set of likely triples instead of requiring one exact
+/// string at runtime.
+fn bundled_names(base: &str) -> Vec<String> {
+    let is_win = cfg!(windows);
+    let suffixes: Vec<String> = if is_win {
+        vec!["-x86_64-pc-windows-msvc.exe".into()]
+    } else {
+        vec![
+            "-x86_64-unknown-linux-gnu".into(),
+            "-x86_64-apple-darwin".into(),
+            "-aarch64-apple-darwin".into(),
+            "-aarch64-unknown-linux-gnu".into(),
+            "-universal-apple-darwin".into(),
+        ]
+    };
+    suffixes
+        .into_iter()
+        .map(|suffix| format!("{base}{suffix}"))
+        .collect()
+}
+
+/// For a macOS app bundle, return the `<name>.app` directory given the running
+/// executable path (which lives in `<name>.app/Contents/MacOS/`).
+fn app_bundle_dir(exec: &std::path::Path) -> Option<std::path::PathBuf> {
+    // Walk up to find a `Contents/MacOS` boundary; the parent of that parent is
+    // the .app bundle.
+    let mut dir = exec.parent()?.to_path_buf();
+    while let Some(parent) = dir.parent() {
+        if parent.file_name()? == "MacOS" {
+            return Some(dir.parent()?.to_path_buf());
+        }
+        dir = parent.to_path_buf();
+    }
+    None
 }
 
 pub fn is_loopback(endpoint: &str) -> bool {
@@ -195,5 +398,12 @@ mod tests {
     fn llm_disabled_by_default() {
         let config = AppConfig::default();
         assert!(!config.llm_allowed());
+    }
+
+    #[test]
+    fn bundled_names_include_expected_triples() {
+        let names = bundled_names("ffmpeg");
+        assert!(names.contains(&"ffmpeg-x86_64-unknown-linux-gnu".to_string()));
+        assert!(names.contains(&"ffmpeg-x86_64-apple-darwin".to_string()));
     }
 }

@@ -8,9 +8,25 @@
 | Windows 10+ (x64, arm64) | egui/eframe, Direct3D/GL | `.msi` / NSIS `.exe` | FFmpeg on PATH (winget/choco/manual); optional tools |
 | Linux (x64, arm64) | egui/eframe, X11/Wayland, GL | `.deb`, `.AppImage` | FFmpeg; `libxkbcommon`, Wayland/X11 libs for the window |
 
-clipfarm deliberately does **not** bundle FFmpeg or model weights in the repository.
-Installers can add them later; for now the app diagnoses what is missing in **Tuning**
-and in `clipfarm doctor`, with per-platform install hints.
+clipfarm bundles **FFmpeg, ffprobe and yt-dlp** inside the Linux and Windows installers
+(as external binaries shipped by cargo-packager), and prefers the bundled copy at runtime
+before falling back to PATH or an explicit config path. The app still diagnoses missing or
+misconfigured tools in **Tuning** and `clipfarm doctor`.
+
+**What is bundled:**
+- Linux + Windows: FFmpeg (GPL static build from BtbN/FFmpeg-Builds, libass included for
+  burned-in captions), ffprobe, and the yt-dlp standalone executable. Each binary is fetched
+  and SHA-256-verified against the upstream release checksums in CI before packaging.
+- macOS: FFmpeg is **not yet bundled**. BtbN/FFmpeg-Builds does not ship macOS builds, so
+  macOS keeps the Homebrew fallback until a macOS static source is pinned and a macOS runner
+  is available. The runtime resolver already prefers a bundled copy when present, so the
+  macOS path is ready once the binary is supplied.
+
+**What is still optional (not bundled into the installer):**
+- whisper.cpp binary + model weights — too large and too build-dependent to bake into the
+  installer. The app downloads a small model in-app on first use (one-click), and falls back
+  to VAD-only when no whisper is available.
+- Ollama / local LLM — auto-detected on the loopback, never bundled.
 
 ### Linux build prerequisites
 

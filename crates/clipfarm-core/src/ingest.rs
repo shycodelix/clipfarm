@@ -53,7 +53,7 @@ pub fn ingest_url(
     if !is_url(url) {
         return Err(anyhow!("`{url}` does not look like an http(s) URL."));
     }
-    let yt_dlp = tools.yt_dlp.as_ref().ok_or_else(|| {
+    let yt_dlp = tools.yt_dlp.as_ref().map(|(path, _)| path).ok_or_else(|| {
         anyhow!(
             "yt-dlp is not installed. Install it (pipx install yt-dlp) or drop a local file instead."
         )
