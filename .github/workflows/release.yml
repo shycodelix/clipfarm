@@ -258,13 +258,13 @@ jobs:
           CARGO_PACKAGER_VERSION: ${{ steps.version.outputs.version }}
           TARGET: ${{ matrix.target }}
         run: |
-          BINARIES_DIR="../../target/${TARGET}/release"
+          BINARIES_DIR="target/${TARGET}/release"
           cat > Packager.toml << PACKAGER_EOF
           name = "clipfarm"
           product-name = "clipfarm"
           identifier = "app.clipfarm.desktop"
           version = "${CARGO_PACKAGER_VERSION}"
-          out-dir = "../../dist"
+          out-dir = "dist"
           binaries-dir = "${BINARIES_DIR}"
           formats = ["${{ matrix.formats }}"]
           icons = ["build/icon.png"]
