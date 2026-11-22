@@ -288,6 +288,30 @@ jobs:
             --target ${{ matrix.target }} \
             -c Packager.toml
 
+      - name: Log packaging manifest
+        if: always()
+        shell: bash
+        run: |
+          echo '=== Generated Packager.toml ==='
+          if [ -f Packager.toml ]; then
+            cat Packager.toml
+          else
+            echo 'Packager.toml not found'
+          fi
+          echo
+          echo '=== External binary inventory ==='
+          BINARIES_DIR="target/${{ matrix.target }}/release"
+          if [ -d "$BINARIES_DIR" ]; then
+            echo "Binaries directory: $BINARIES_DIR"
+            ls -la "$BINARIES_DIR" | grep -E '(clipfarm|ffmpeg|ffprobe|yt-dlp)' || echo 'No expected binaries found'
+          else
+            echo "Binaries directory not found: $BINARIES_DIR"
+          fi
+          echo
+          echo "Package version: ${{ steps.version.outputs.version }}"
+          echo "GitHub ref: ${{ github.ref }}"
+          echo "Is tag: ${{ startsWith(github.ref, 'refs/tags/') }}"
+
       - name: Rebuild .deb with dpkg-deb (cargo-packager ar header fix)
         if: matrix.formats == 'deb'
         run: |
@@ -302,6 +326,13 @@ jobs:
           # Remove the raw cargo-packager .deb so only the dpkg-deb-rebuilt
           # package is uploaded (avoids shipping two .debs with similar names).
           rm -f dist/clipfarm-app_*.deb
+
+      - name: Guard for non-tag runs
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        run: |
+          echo 'NOTE: This workflow_dispatch run did not use a tag (refs/tags/v*).'
+          echo 'Installers were built but will not be attached to a GitHub release.'
+          echo 'To publish a release, push a tag matching v* instead.'
 
       - name: Upload installers
         uses: actions/upload-artifact@v4
