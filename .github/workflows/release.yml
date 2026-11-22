@@ -254,6 +254,7 @@ jobs:
           echo "version=$ver" >> "$GITHUB_OUTPUT"
 
       - name: Package
+        shell: bash
         env:
           CARGO_PACKAGER_VERSION: ${{ steps.version.outputs.version }}
           TARGET: ${{ matrix.target }}
