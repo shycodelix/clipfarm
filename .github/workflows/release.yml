@@ -259,7 +259,7 @@ jobs:
           TARGET: ${{ matrix.target }}
         run: |
           BINARIES_DIR="../../target/${TARGET}/release"
-          cat > Packager.toml << 'PACKAGER_EOF'
+          cat > Packager.toml << PACKAGER_EOF
           name = "clipfarm"
           product-name = "clipfarm"
           identifier = "app.clipfarm.desktop"
