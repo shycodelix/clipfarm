@@ -13,6 +13,7 @@ pub mod llm;
 pub mod media;
 pub mod metadata;
 pub mod model;
+pub mod observe;
 pub mod pipeline;
 pub mod project;
 pub mod refine;

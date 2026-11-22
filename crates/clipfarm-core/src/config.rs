@@ -1,6 +1,16 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+#[cfg(target_os = "linux")]
+const IS_LINUX_TARGET: bool = true;
+#[cfg(not(target_os = "linux"))]
+const IS_LINUX_TARGET: bool = false;
+
+#[cfg(target_os = "windows")]
+const IS_WINDOWS_TARGET: bool = true;
+#[cfg(not(target_os = "windows"))]
+const IS_WINDOWS_TARGET: bool = false;
+
 use crate::project::data_dir;
 use crate::util::{which, write_atomic};
 
@@ -25,6 +35,11 @@ pub struct AppConfig {
     pub llm_model: String,
     #[serde(default)]
     pub llm_enabled: bool,
+
+    /// If true, the app may record coarse, local-only usage events described in the
+    /// observation design doc. Off by default. No network, no content, no identity.
+    #[serde(default)]
+    pub observe_enabled: bool,
 }
 
 fn default_llm_endpoint() -> String {
@@ -46,6 +61,7 @@ impl Default for AppConfig {
             llm_endpoint: default_llm_endpoint(),
             llm_model: default_llm_model(),
             llm_enabled: false,
+            observe_enabled: false,
         }
     }
 }
@@ -211,8 +227,11 @@ fn bundled_ffmpeg() -> Option<PathBuf> {
 
         // Windows NSIS: externals are placed next to the app exe in the install
         // root ($INSTDIR), with the `<name>-<triple>.exe` naming.
-        if cfg!(windows) {
-            for name in bundled_names("ffmpeg.exe") {
+        // Linux .deb: cargo-packager places externals into usr/bin/ alongside the
+        // app binary, with the same `<name>-<triple>` naming, so probe the exe
+        // parent dir on Linux as well.
+        if IS_WINDOWS_TARGET || IS_LINUX_TARGET {
+            for name in bundled_names(if IS_WINDOWS_TARGET { "ffmpeg.exe" } else { "ffmpeg" }) {
                 let candidate = exec.parent()?.join(&name);
                 if candidate.is_file() {
                     return Some(candidate);
@@ -235,8 +254,8 @@ fn bundled_ffprobe() -> Option<PathBuf> {
                 }
             }
         }
-        if cfg!(windows) {
-            for name in bundled_names("ffprobe.exe") {
+        if IS_WINDOWS_TARGET || IS_LINUX_TARGET {
+            for name in bundled_names(if IS_WINDOWS_TARGET { "ffprobe.exe" } else { "ffprobe" }) {
                 let candidate = exec.parent()?.join(&name);
                 if candidate.is_file() {
                     return Some(candidate);
@@ -252,40 +271,24 @@ fn bundled_ffprobe() -> Option<PathBuf> {
 /// checked under those triple-suffixed names first, then under the standalone
 /// release names (yt-dlp.exe / yt-dlp_macos / yt-dlp_linux) as a fallback for
 /// manual installs.
+///
+/// On Linux the packager places externals into `usr/bin/` next to the app binary,
+/// so we probe the running exe's parent directory on Linux in the same way we do on
+/// Windows. The earlier Linux-only fallback that scanned both the app-bundle dir and
+/// the exe parent dir for every triple was both redundant (Linux is not an app bundle)
+/// and incomplete (it never meaningfully covered the installed .deb layout).
 fn bundled_yt_dlp() -> Option<PathBuf> {
     if let Some(exec) = std::env::current_exe().ok().as_ref() {
-        // Triple-suffixed names are what cargo-packager places into the app
-        // package. Check those first on every platform.
-        for name in bundled_names("yt-dlp") {
-            // On macOS the packager puts externals inside the .app bundle.
-            if let Some(app) = app_bundle_dir(exec) {
-                let candidate = app.join("Contents/MacOS").join(&name);
-                if candidate.is_file() {
-                    return Some(candidate);
-                }
-            }
-            // On Windows the packager puts externals next to the app exe.
-            if cfg!(windows) {
-                if let Some(dir) = exec.parent() {
-                    let candidate = dir.join(&name);
-                    if candidate.is_file() {
-                        return Some(candidate);
-                    }
-                }
-            }
-            // Linux: check next to the exe as a fallback for some layouts.
-            if let Some(dir) = exec.parent() {
-                let candidate = dir.join(&name);
-                if candidate.is_file() {
-                    return Some(candidate);
-                }
-            }
-        }
-
-        // Fallback: standalone release names (manual installs, non-packaged
-        // layouts).
+        // macOS: externals live inside the .app bundle's Contents/MacOS/.
         if let Some(app) = app_bundle_dir(exec) {
             let macos_dir = app.join("Contents/MacOS");
+            for name in bundled_names("yt-dlp") {
+                let candidate = macos_dir.join(&name);
+                if candidate.is_file() {
+                    return Some(candidate);
+                }
+            }
+            // Fallback: standalone release names (manual installs).
             for name in &["yt-dlp_macos", "yt-dlp.exe", "yt-dlp"] {
                 let candidate = macos_dir.join(name);
                 if candidate.is_file() {
@@ -293,18 +296,22 @@ fn bundled_yt_dlp() -> Option<PathBuf> {
                 }
             }
         }
-        if cfg!(windows) {
-            if let Some(dir) = exec.parent() {
-                for name in &["yt-dlp.exe", "yt-dlp"] {
-                    let candidate = dir.join(name);
-                    if candidate.is_file() {
-                        return Some(candidate);
-                    }
+
+        // Windows NSIS + Linux .deb: externals live next to the app binary.
+        if IS_WINDOWS_TARGET || IS_LINUX_TARGET {
+            let dir = exec.parent()?;
+            for name in bundled_names(if IS_WINDOWS_TARGET { "yt-dlp.exe" } else { "yt-dlp" }) {
+                let candidate = dir.join(&name);
+                if candidate.is_file() {
+                    return Some(candidate);
                 }
             }
-        }
-        for name in &["yt-dlp_linux", "yt-dlp"] {
-            if let Some(dir) = exec.parent() {
+            // Fallback: standalone release names (manual installs, non-packaged
+            // layouts).
+            for name in &[
+                if IS_WINDOWS_TARGET { "yt-dlp.exe" } else { "yt-dlp_linux" },
+                "yt-dlp",
+            ] {
                 let candidate = dir.join(name);
                 if candidate.is_file() {
                     return Some(candidate);
@@ -320,7 +327,7 @@ fn bundled_yt_dlp() -> Option<PathBuf> {
 /// Windows). We probe a small set of likely triples instead of requiring one exact
 /// string at runtime.
 fn bundled_names(base: &str) -> Vec<String> {
-    let is_win = cfg!(windows);
+    let is_win = IS_WINDOWS_TARGET;
     let suffixes: Vec<String> = if is_win {
         vec!["-x86_64-pc-windows-msvc.exe".into()]
     } else {

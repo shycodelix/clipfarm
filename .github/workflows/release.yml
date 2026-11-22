@@ -18,17 +18,19 @@ jobs:
   # Linux + Windows are required for a release. Each installer ships the desktop app,
   # the `clipfarm` CLI, and the bundled runtime dependencies (FFmpeg, ffprobe and
   # yt-dlp) as external binaries, verified against upstream checksums before
-  # packaging. macOS runners are intermittently unavailable on shared GitHub runners,
-  # so macOS is built in a separate matrix that does not block the attach job.
+  # packaging.
   #
   # Bundling plan:
   #   - Linux + Windows: FFmpeg (BtbN/FFmpeg-Builds, GPL static, libass included)
   #     from a pinned auto-build release + ffprobe + yt-dlp standalone, fetched and
   #     SHA-256 verified per target. Pinning the FFmpeg release makes installer
   #     contents reproducible; bump FFMPEG_RELEASE when you want a newer build.
-  #   - macOS: BtbN does not ship macOS builds, so the macOS legs keep the existing
-  #     Homebrew fallback for now. The runtime resolver (config.rs) already prefers
-  #     a bundled copy when present, so the macOS path is ready once a macOS static
+  #   - macOS: intentionally not built in this workflow. BtbN does not ship macOS
+  #     builds, and shared GitHub macOS runners are intermittently unavailable, so
+  #     macOS was dropped from the release matrix as a live blocker. macOS parity
+  #     (DMG + bundled FFmpeg/ffprobe/yt-dlp, or a clean install path) is a
+  #     deferred follow-up; the runtime resolver (config.rs) already prefers a
+  #     bundled copy when present, so the app side is ready once a macOS static
   #     source is pinned and a macOS runner is available.
   installers:
     name: build (${{ matrix.display }})
@@ -60,6 +62,19 @@ jobs:
       # find them as externalBinaries. FFmpeg/ffprobe come from BtbN/FFmpeg-Builds
       # (Linux + Windows only); yt-dlp comes from the yt-dlp standalone releases.
       # Both are verified against the upstream release checksums before packaging.
+      - name: Build release binaries
+        run: cargo build --release --target ${{ matrix.target }} -p clipfarm-cli -p clipfarm-app
+
+      # Fetch and verify the bundled runtime dependencies AFTER the release build so
+      # the freshly compiled target dir is not clobbered before cargo-packager sees it.
+      # cargo-packager places each external binary into the app package using the
+      # platform conventions and the triple-suffixed names it expects:
+      #   Linux:   usr/bin/<name>-<triple>   (.deb)
+      #   Windows: $INSTDIR/<name>-<triple>.exe   (NSIS, next to the app .exe)
+      #   macOS:   <app>.app/Contents/MacOS/<name>-<triple>
+      # The names below are WITHOUT the target-triple suffix: cargo-packager appends
+      # `-<target-triple>` (and `.exe` on Windows) automatically when it looks for the
+      # file in the binaries directory.
       - name: Bundle runtime dependencies (Linux)
         if: runner.os == 'Linux'
         env:
@@ -70,7 +85,7 @@ jobs:
           YT_DLP_VERSION: 2026.10.26                      # pinned yt-dlp standalone release
         run: |
           set -euo pipefail
-          BINARIES_DIR="../../target/${TARGET}/release"
+          BINARIES_DIR="target/${TARGET}/release"
           mkdir -p "$BINARIES_DIR"
 
           # ---- FFmpeg / ffprobe ----
@@ -157,7 +172,7 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
           $Target = "$env:TARGET"
-          $BinariesDir = "../../target/$Target/release"
+          $BinariesDir = "target/$Target/release"
           New-Item -ItemType Directory -Force -Path $BinariesDir | Out-Null
 
           # ---- FFmpeg / ffprobe ----
@@ -219,10 +234,12 @@ jobs:
       - name: Prereqs (Windows)
         if: runner.os == 'Windows'
         run: |
-          # FFmpeg is now bundled as an external binary; no system FFmpeg is
-          # required to build or package the installer. Keep the choco line as a
-          # no-op safety net for the build step's own developer tooling needs.
-          choco install ffmpeg -y
+          # The installer bundles FFmpeg, ffprobe and yt-dlp, so no system FFmpeg
+          # is required to build or package the installer. This line is intentionally
+          # a no-op leftover from before bundling; keep it only so `choco` is not
+          # fetched by accident on windows-latest. Do NOT install FFmpeg here.
+          Write-Host "Windows bundles its own FFmpeg/ffprobe/yt-dlp; no system FFmpeg required."
+
 
       - name: Version from tag
         id: version
@@ -236,21 +253,39 @@ jobs:
           fi
           echo "version=$ver" >> "$GITHUB_OUTPUT"
 
-      - name: Build release binaries
-        run: cargo build --release --target ${{ matrix.target }} -p clipfarm-cli -p clipfarm-app
-
       - name: Package
-        shell: bash
         env:
           CARGO_PACKAGER_VERSION: ${{ steps.version.outputs.version }}
+          TARGET: ${{ matrix.target }}
         run: |
-          cargo install cargo-packager --locked
+          BINARIES_DIR="../../target/${TARGET}/release"
+          cat > Packager.toml << 'PACKAGER_EOF'
+          name = "clipfarm"
+          product-name = "clipfarm"
+          identifier = "app.clipfarm.desktop"
+          version = "${CARGO_PACKAGER_VERSION}"
+          out-dir = "../../dist"
+          binaries-dir = "${BINARIES_DIR}"
+          formats = ["${{ matrix.formats }}"]
+          icons = ["build/icon.png"]
+          binaries = [
+            { path = "clipfarm-app", main = true },
+            { path = "clipfarm" },
+          PACKAGER_EOF
+
+          # Add external binaries to the config with their triple-suffixed names.
+          # These files are placed into the binaries-dir by the "Bundle runtime
+          # dependencies" step above.
+          for name in ffmpeg ffprobe yt-dlp; do
+            echo "            { path = \"${name}-${TARGET}\" }," >> Packager.toml
+          done
+          # Close the binaries array.
+          echo "          ]" >> Packager.toml
+          cat Packager.toml
+
           cargo packager --release \
             --target ${{ matrix.target }} \
-            -p clipfarm-app \
-            -f ${{ matrix.formats }} \
-            --out-dir ../../dist \
-            --binaries-dir ../../target/${{ matrix.target }}/release
+            -c Packager.toml
 
       - name: Rebuild .deb with dpkg-deb (cargo-packager ar header fix)
         if: matrix.formats == 'deb'
@@ -266,80 +301,6 @@ jobs:
           # Remove the raw cargo-packager .deb so only the dpkg-deb-rebuilt
           # package is uploaded (avoids shipping two .debs with similar names).
           rm -f dist/clipfarm-app_*.deb
-
-      - name: Upload installers
-        uses: actions/upload-artifact@v4
-        with:
-          name: clipfarm-${{ matrix.formats }}-${{ matrix.target }}
-          path: |
-            dist/*.deb
-            dist/*.dmg
-            dist/*.exe
-          if-no-files-found: error
-
-  installers-macos:
-    name: build (${{ matrix.display }})
-    runs-on: ${{ matrix.runner }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - display: macOS DMG (x86_64)
-            runner: macos-latest
-            target: x86_64-apple-darwin
-            formats: dmg
-
-          - display: macOS DMG (ARM64)
-            runner: macos-latest
-            target: aarch64-apple-darwin
-            formats: dmg
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          target: ${{ matrix.target }}
-
-      - uses: Swatinem/rust-cache@v2
-
-      # macOS: no bundled FFmpeg yet (BtbN does not ship macOS builds, and shared
-      # GitHub macOS runners are intermittently unavailable). Keep the Homebrew
-      # fallback until a macOS static source is pinned and a runner is available.
-      - name: Prereqs (macOS)
-        run: brew install ffmpeg
-
-      - name: Version from tag
-        id: version
-        shell: bash
-        run: |
-          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
-            ver="${GITHUB_REF_NAME#v}"
-          else
-            ver="0.0.0-dev"
-          fi
-          echo "version=$ver" >> "$GITHUB_OUTPUT"
-
-      - name: Build release binaries
-        run: cargo build --release --target ${{ matrix.target }} -p clipfarm-cli -p clipfarm-app
-
-      # macOS does not yet bundle FFmpeg/ffprobe/yt-dlp as externalBinaries.
-      # Once a macOS static source is chosen (e.g. Evermeet or a build-from-source
-      # leg) and a macOS runner is available, add a "Bundle runtime dependencies
-      # (macOS)" step mirroring the Linux/Windows one, then enable externalBinaries
-      # for the dmg legs.
-      - name: Package
-        shell: bash
-        env:
-          CARGO_PACKAGER_VERSION: ${{ steps.version.outputs.version }}
-        run: |
-          cargo install cargo-packager --locked
-          cargo packager --release \
-            --target ${{ matrix.target }} \
-            -p clipfarm-app \
-            -f ${{ matrix.formats }} \
-            --out-dir ../../dist \
-            --binaries-dir ../../target/${{ matrix.target }}/release
 
       - name: Upload installers
         uses: actions/upload-artifact@v4

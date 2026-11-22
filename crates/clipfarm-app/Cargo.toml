@@ -61,31 +61,33 @@ short-version = "${CARGO_PACKAGER_VERSION}"
 [target.'cfg(linux)'.package.metadata.packager]
 short-version = "${CARGO_PACKAGER_VERSION}"
 
-# Bundled runtime dependencies. The packager places each external binary into the
-# app package using the platform conventions:
+# Bundled runtime dependencies. The release workflow (.github/workflows/release.yml)
+# fetches and verifies these from upstream, places them into the binaries directory
+# with triple-suffixed names, and generates a Packager.toml that lists them in the
+# `binaries` array so cargo-packager includes them in the installer.
 #
+# The platform conventions for where the packager places each binary:
 #   macOS:   <app>.app/Contents/MacOS/<name>-<triple>
 #   Linux:   usr/bin/<name>-<triple>   (.deb; on install the plain Binary is what
 #            ends up on PATH, so the user-visible name is the plain one)
 #   Windows: $INSTDIR/<name>-<triple>.exe   (next to the app .exe)
 #
-# The names below are WITHOUT the target-triple suffix: cargo-packager appends
-# `-<target-triple>` (and `.exe` on Windows) automatically when it looks for the
-# file in the binaries directory.
-#
-# The actual files are fetched and verified in CI (.github/workflows/release.yml)
-# from these sources:
-#   - FFmpeg/ffprobe:  BtbN/FFmpeg-Builds "latest" release, GPL static build,
+# The actual files are fetched and verified in CI from these sources:
+#   - FFmpeg/ffprobe:  BtbN/FFmpeg-Builds pinned release, GPL static build,
 #                       verified against that release's checksums.sha256. Linux and
 #                       Windows only; BtbN does not ship macOS builds.
-#   - yt-dlp:          yt-dlp standalone release (yt-dlp.exe / yt-dlp_macos /
-#                       yt-dlp_linux), verified against the release checksums.
+#   - yt-dlp:          yt-dlp standalone release, verified against the release
+#                       checksums.
 #
 # macOS FFmpeg: BtbN does not ship macOS, so the macOS legs keep the existing
 # Homebrew fallback until a macOS runner is available and a macOS static source is
 # pinned. The runtime resolver (config.rs) already prefers a bundled copy when
 # present, so the macOS path is ready once the binary is supplied.
-externalBinaries = ["ffmpeg", "ffprobe", "yt-dlp"]
+#
+# NOTE: externalBinaries is NOT used directly because cargo-packager 0.11.x does
+# not resolve those names relative to --binaries-dir. Instead, the release workflow
+# generates a Packager.toml with the external binaries listed explicitly in the
+# `binaries` array.
 
 # Signing is intentionally left disabled until macOS/Windows code-signing secrets
 # are provided. See docs/PLATFORM.md for the recommended signing setup.

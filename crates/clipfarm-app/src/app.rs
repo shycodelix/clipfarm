@@ -6,6 +6,7 @@ use std::time::{Duration, Instant};
 use clipfarm_core::analyze::AnalyzeOptions;
 use clipfarm_core::export::{ExportOptions, ExportOutcome, Quality};
 use clipfarm_core::model::{Clip, ExportKind, Niche, Platform, Project, MAX_CLIP_SECONDS};
+use clipfarm_core::observe;
 use clipfarm_core::pipeline;
 use clipfarm_core::project::{self, ProjectSummary};
 use clipfarm_core::refine;
@@ -98,6 +99,10 @@ pub struct ClipfarmApp {
     screenshot_path: Option<PathBuf>,
     screenshot_frames: u32,
     screenshot_requested: bool,
+
+    /// Local-only usage observation store. Created lazily after config is loaded so
+    /// it respects the opt-in setting.
+    observe: Option<observe::Store>,
 }
 
 impl ClipfarmApp {
@@ -134,8 +139,26 @@ impl ClipfarmApp {
             screenshot_path: None,
             screenshot_frames: 0,
             screenshot_requested: false,
+            observe: None,
         };
         app.refresh_projects();
+        app.observe = observe::Store::new(app.config.observe_enabled).ok();
+        if let Some(observe) = app.observe.as_ref() {
+            let _ = observe.append(observe::Event {
+                kind: observe::EventKind::AppStarted,
+                screen: None,
+                source_kind: None,
+                clip_count_bucket: None,
+                whisper_used: None,
+                llm_enabled: None,
+                failure_category: None,
+                refine_shape: None,
+                export_kind: None,
+                caption_on: None,
+                vertical: None,
+                encoder_bucket: None,
+            });
+        }
         let mut args = std::env::args().skip(1);
         while let Some(arg) = args.next() {
             match arg.as_str() {
@@ -164,6 +187,16 @@ impl ClipfarmApp {
         }
         let _ = cc;
         app
+    }
+
+    fn observe_store(&mut self) -> Option<&observe::Store> {
+        self.observe.as_ref()
+    }
+
+    fn record_event(&mut self, event: observe::Event) {
+        if let Some(store) = self.observe_store() {
+            let _ = store.append(event);
+        }
     }
 
     fn refresh_projects(&mut self) {
@@ -201,6 +234,25 @@ impl ClipfarmApp {
             self.toast("Give me a file or a link first.", false);
             return;
         }
+        let source_kind = if Path::new(&input).is_file() {
+            observe::SourceKind::Local
+        } else {
+            observe::SourceKind::Remote
+        };
+        let _ = self.record_event(observe::Event {
+            kind: observe::EventKind::HarvestStarted,
+            screen: None,
+            source_kind: Some(source_kind),
+            clip_count_bucket: None,
+            whisper_used: None,
+            llm_enabled: None,
+            failure_category: None,
+            refine_shape: None,
+            export_kind: None,
+            caption_on: None,
+            vertical: None,
+            encoder_bucket: None,
+        });
         let config = self.config.clone();
         let name = self.name.trim().to_string();
         let niche = self.niche;
@@ -269,6 +321,20 @@ impl ClipfarmApp {
         let Some(mut project) = self.project.clone() else {
             return;
         };
+        let _ = self.record_event(observe::Event {
+            kind: observe::EventKind::HarvestStarted,
+            screen: None,
+            source_kind: None,
+            clip_count_bucket: None,
+            whisper_used: None,
+            llm_enabled: None,
+            failure_category: None,
+            refine_shape: None,
+            export_kind: None,
+            caption_on: None,
+            vertical: None,
+            encoder_bucket: None,
+        });
         let config = self.config.clone();
         let target_clips = self.target_clips;
         let max_seconds = self.max_seconds.min(MAX_CLIP_SECONDS);
@@ -461,6 +527,8 @@ impl ClipfarmApp {
                 JobEvent::Harvest { project, warnings } => {
                     let clips = project.clips.len();
                     let name = project.name.clone();
+                    let whisper_used = self.config.whisper_cli.is_some();
+                    let llm_enabled = self.config.llm_allowed();
                     self.project = Some(*project);
                     self.selected = 0;
                     self.screen = Screen::Clips;
@@ -468,9 +536,23 @@ impl ClipfarmApp {
                     self.thumbnails.clear();
                     self.refresh_projects();
                     self.toast(format!("{clips} clips from “{name}”. Go be picky."), true);
+                    let _ = self.record_event(observe::Event {
+                        kind: observe::EventKind::HarvestCompleted,
+                        screen: None,
+                        source_kind: None,
+                        clip_count_bucket: Some(observe::ClipCountBucket::of_clip_count(clips)),
+                        whisper_used: Some(whisper_used),
+                        llm_enabled: Some(llm_enabled),
+                        failure_category: None,
+                        refine_shape: None,
+                        export_kind: None,
+                        caption_on: None,
+                        vertical: None,
+                        encoder_bucket: None,
+                    });
                     finished = true;
                 }
-                JobEvent::Exported(outcome) => {
+                                JobEvent::Exported(outcome) => {
                     let preview = self.job.as_ref().map(|job| job.preview).unwrap_or(false);
                     if preview {
                         open_path(&outcome.path);
@@ -478,6 +560,7 @@ impl ClipfarmApp {
                         finished = true;
                         continue;
                     }
+
                     let message = format!(
                         "{} · {} · {}",
                         match outcome.kind {
@@ -501,10 +584,52 @@ impl ClipfarmApp {
                     }
                     self.refresh_projects();
                     self.toast(message, true);
+
+                    let caption_on = self.project
+                        .as_ref()
+                        .and_then(|p| p.clips.iter().find(|c| c.id == outcome.clip_id))
+                        .map(|c| c.settings.captions_enabled);
+                    let vertical = self.project
+                        .as_ref()
+                        .and_then(|p| p.clips.iter().find(|c| c.id == outcome.clip_id))
+                        .map(|c| c.settings.vertical);
+                    let export_kind = match outcome.kind {
+                        ExportKind::Raw => "raw",
+                        ExportKind::Rendered => "rendered",
+                    };
+                    let _ = self.record_event(observe::Event {
+                        kind: observe::EventKind::ClipExported,
+                        screen: None,
+                        source_kind: None,
+                        clip_count_bucket: None,
+                        whisper_used: None,
+                        llm_enabled: None,
+                        failure_category: None,
+                        refine_shape: None,
+                        export_kind: Some(export_kind.to_string()),
+                        caption_on,
+                        vertical,
+                        encoder_bucket: Some(observe::EncoderBucket::from_encoder_name(&outcome.encoder)),
+                    });
                     finished = true;
                 }
                 JobEvent::Failed(error) => {
+                    let category = observe::FailureCategory::from_error_text(&error);
                     self.toast(error, false);
+                    let _ = self.record_event(observe::Event {
+                        kind: observe::EventKind::HarvestFailed,
+                        screen: None,
+                        source_kind: None,
+                        clip_count_bucket: None,
+                        whisper_used: None,
+                        llm_enabled: None,
+                        failure_category: Some(category),
+                        refine_shape: None,
+                        export_kind: None,
+                        caption_on: None,
+                        vertical: None,
+                        encoder_bucket: None,
+                    });
                     finished = true;
                 }
             }
@@ -569,14 +694,10 @@ impl ClipfarmApp {
     }
 
     fn apply_refine(&mut self) {
-        let Some(project) = self.project.as_mut() else {
-            return;
-        };
         let instruction = self.refine_text.trim().to_string();
         if instruction.is_empty() {
             return;
         }
-        let snapshot = project.clone();
         let llm = if self.config.llm_allowed() {
             Some((
                 self.config.llm_endpoint.as_str(),
@@ -585,23 +706,47 @@ impl ClipfarmApp {
         } else {
             None
         };
-        let Some(clip) = project.clips.get_mut(self.selected) else {
-            return;
-        };
-        match refine::refine(&snapshot, clip, &instruction, llm) {
-            Some(changes) => {
-                self.refine_log = changes;
-                self.refine_text.clear();
-                if let Err(error) = project::save_project(project) {
-                    self.toast(format!("Could not save: {error}"), false);
+        let shape = {
+            let Some(project) = self.project.as_mut() else {
+                return;
+            };
+            let snapshot = project.clone();
+            let Some(clip) = project.clips.get_mut(self.selected) else {
+                return;
+            };
+            match refine::refine(&snapshot, clip, &instruction, llm) {
+                Some(changes) => {
+                    self.refine_log = changes;
+                    self.refine_text.clear();
+                    observe::RefineShape::from_refine_changes(&self.refine_log)
+                }
+                None => {
+                    self.refine_log.clear();
+                    self.toast(
+                        "No changes from that instruction. Try again or undo and tweak the prompt.",
+                        false,
+                    );
+                    return;
                 }
             }
-            None => {
-                self.refine_log.clear();
-                self.toast(
-                    "I did not catch an edit in there. Try “30 seconds”, “start 2s later”, “captions off”.",
-                    false,
-                );
+        };
+        let _ = self.record_event(observe::Event {
+            kind: observe::EventKind::ClipRefined,
+            screen: None,
+            source_kind: None,
+            clip_count_bucket: None,
+            whisper_used: None,
+            llm_enabled: None,
+            failure_category: None,
+            refine_shape: Some(shape),
+            export_kind: None,
+            caption_on: None,
+            vertical: None,
+            encoder_bucket: None,
+        });
+        if let Some(project) = self.project.as_mut() {
+            if let Err(error) = project::save_project(project) {
+                self.toast(format!("Could not save: {error}"), false);
             }
         }
     }
@@ -1658,6 +1803,46 @@ impl ClipfarmApp {
                 RichText::new("Only loopback addresses are accepted; clipfarm refuses anything else at call time.")
                     .size(10.5)
                     .color(p.faint),
+            );
+            ui.add_space(10.0);
+            ui.horizontal(|ui| {
+                ui.checkbox(
+                    &mut self.config.observe_enabled,
+                    RichText::new("Help clipfarm learn what people actually do").size(12.0),
+                );
+                if self.config.observe_enabled {
+                    let have_store =
+                        self.observe.as_ref().map(|s| s.has_data()).unwrap_or(false);
+                    if theme::quiet(ui, p, "Clear local usage data").clicked() {
+                        if let Some(store) = self.observe.as_ref() {
+                            let _ = store.clear();
+                        }
+                        self.toast("Local usage data cleared.", true);
+                    }
+                    ui.label(
+                        RichText::new(format!(
+                            "On · local data {}",
+                            if have_store {
+                                "saved".to_string()
+                            } else {
+                                "not yet created".to_string()
+                            }
+                        ))
+                        .size(11.0)
+                        .color(p.faint),
+                    );
+                } else {
+                    ui.label(
+                        RichText::new("Off · nothing is recorded").size(11.0).color(p.faint),
+                    );
+                }
+            });
+            ui.label(
+                RichText::new(
+                    "This stays on your machine in this version. It records coarse actions only, never the clips, captions, links, files or error text itself, and it starts off."
+                )
+                .size(10.5)
+                .color(p.faint),
             );
             ui.add_space(10.0);
             if theme::primary(ui, p, "Save tuning").clicked() {
