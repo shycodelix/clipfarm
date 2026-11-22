@@ -23,8 +23,8 @@ long VOD ──► speech/VAD ──► clip planning ──► review ──┬
 | Platform | Link |
 | --- | --- |
 | **macOS** (Apple silicon & Intel, `.dmg`) | _Coming soon_ — queued in CI (macOS runners unavailable at the moment; FFmpeg will be bundled once a macOS static source is pinned) |
-| **Windows** (NSIS installer, `.exe`) | [clipfarm-app_0.2.0_x64-setup.exe](https://github.com/shycodelix/clipfarm/releases/download/v0.2.0/clipfarm-app_0.2.0_x64-setup.exe) |
-| **Linux** (Debian/Ubuntu, `.deb`) | [clipfarm-x86_64-unknown-linux-gnu.deb](https://github.com/shycodelix/clipfarm/releases/download/v0.2.0/clipfarm-x86_64-unknown-linux-gnu.deb) |
+| **Windows** (NSIS installer, `.exe`) | [clipfarm-app_0.2.1_x64-setup.exe](https://github.com/shycodelix/clipfarm/releases/download/v0.2.1/clipfarm-app_0.2.1_x64-setup.exe) |
+| **Linux** (Debian/Ubuntu, `.deb`) | [clipfarm-x86_64-unknown-linux-gnu.deb](https://github.com/shycodelix/clipfarm/releases/download/v0.2.1/clipfarm-x86_64-unknown-linux-gnu.deb) |
 
 Past releases are in [Releases](https://github.com/shycodelix/clipfarm/releases).
 
@@ -94,14 +94,14 @@ Both rooms in both palettes, rendered from the real app (headless Linux, 1440×9
 | **Ollama** (or any loopback OpenAI-ish JSON endpoint) | optional | Local title/refine assistance. Off by default. |
 | **Rust 1.80+** | build only | `rustup` installs it. |
 
-Install FFmpeg:
+If you use the installers above, FFmpeg, ffprobe and yt-dlp are already bundled — no manual install needed. For building from source or on macOS, install FFmpeg:
 
 ```bash
 # macOS
 brew install ffmpeg
-# Windows
+# Windows (only if not using the installer)
 winget install Gyan.FFmpeg        # or: choco install ffmpeg
-# Debian / Ubuntu
+# Debian / Ubuntu (only if not using the .deb)
 sudo apt install ffmpeg
 ```
 
